@@ -42,10 +42,13 @@ mkdir -p pandas-mutant/$SLURM_ARRAY_TASK_ID
 cd pandas-mutant/$SLURM_ARRAY_TASK_ID
 rm -rf pandas
 git clone /projects/genomic-ml/projects/mutation-testing/pandas
+#rm -rf mambaforge
+#cp -r /projects/genomic-ml/projects/mutation-testing/mambaforge .
+#eval \"$(mambaforge/bin/conda shell.bash hook)\"
+eval \"$(/projects/genomic-ml/projects/mutation-testing/mambaforge/bin/conda shell.bash hook)\"
 cd pandas
 git checkout v2.2.1
 if [ -e ", mutant.c, " ]; then cp ", mutant.c, " pandas/", relative.c, "; fi
-eval \"$(/home/th798/mambaforge/bin/conda shell.bash hook)\"
 conda activate pandas-dev
 python -m pip install -ve . --no-build-isolation --config-settings editable-verbose=true
 PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' pandas
@@ -66,13 +69,11 @@ PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and no
   }
 }
 
-JOBID.glob <- file.path(scratch.dir, "data.table/src/*JOBID")
-JOBID.vec <- Sys.glob(JOBID.glob)
-unlink(JOBID.vec[file.size(JOBID.vec)==2])
+JOBID.glob <- file.path(scratch.dir, "_libs/src/parser/*JOBID")
 JOBID.dt <- nc::capture_first_glob(
   JOBID.glob,
   scratch.dir,
-  "/data.table/src/",
+  "/_libs/src/parser/",
   file=".*?",
   ".JOBID",
   READ=function(f)fread(f,col.names="job"))
@@ -80,9 +81,9 @@ sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
 raw.dt <- slurm::sacct_lines(sacct.arg)
 sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
 options(width=150)
-wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, length)
-fwrite(wide.dt, "data.table.jobs.csv")
+(wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, length))
 
+fwrite(wide.dt, "data.table.jobs.csv")
 sacct.dt[State_blank=="OUT_OF_MEMORY"]
 sacct.dt[State_blank=="RUNNING"]
 sacct.dt[State_blank=="COMPLETED"][order(Elapsed)]
