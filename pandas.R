@@ -107,9 +107,158 @@ JOBID.dt <- nc::capture_first_vec(
 )[, fread(path,col.names="job"), by=file]
 sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
 raw.dt <- slurm::sacct_lines(sacct.arg)
-sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
-options(width=150)
-(wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, length))
+code.names <- c("compile|test"=1, import=4, segfault=11)
+(code.dt <- data.table(
+  ExitCode_blank=paste0(code.names,":0"),
+  ExitCode=names(code.names)))
+sacct.dt <- slurm::sacct_tasks(
+  raw.dt
+)[
+  JOBID.dt, on="job"
+]
+sacct.join <- code.dt[
+  sacct.dt, on="ExitCode_blank"
+][
+  is.na(ExitCode), ExitCode := ExitCode_blank
+][]
+options(width=80)
+(wide.dt <- dcast(sacct.join, job + file ~ State_blank + ExitCode, length))
+
+log.glob <- "/scratch/th798/mutation-testing/pandas/_libs/src/parser/io.c.logs/*"
+system(paste("grep 'short test summary info'",log.glob),intern=TRUE)
+system(paste("grep 'failed,'",log.glob),intern=TRUE)
+
+## FAILED 1:0 means compilation error or test failure as below.
+## ============================= short test summary info =============================
+## FAILED ../pylib/pandas/tests/config/test_localization.py::test_encoding_detected
+## FAILED ../pylib/pandas/tests/indexes/period/test_formats.py::TestPeriodIndexFormat::test_period_non_ascii_fmt[(None, None)]
+## = 2 failed, 217345 passed, 6533 skipped, 6933 deselected, 1809 xfailed, 93 xpassed, 23 warnings in 1180.86s (0:19:40) =
+
+## ==================================== FAILURES =====================================
+## _____________________________ test_encoding_detected ______________________________
+
+##     def test_encoding_detected():
+##         system_locale = os.environ.get("LC_ALL")
+##         system_encoding = system_locale.split(".")[-1] if system_locale else "utf-8"
+    
+## >       assert (
+##             codecs.lookup(pd.options.display.encoding).name
+##             == codecs.lookup(system_encoding).name
+##         )
+## E       LookupError: unknown encoding: C
+
+## ../pylib/pandas/tests/config/test_localization.py:153: LookupError
+## __________ TestPeriodIndexFormat.test_period_non_ascii_fmt[(None, None)] __________
+
+## self = <pandas.tests.indexes.period.test_formats.TestPeriodIndexFormat object at 0x153e224060e0>
+## locale_str = None
+
+##     @pytest.mark.parametrize(
+##         "locale_str",
+##         [
+##             pytest.param(None, id=str(locale.getlocale())),
+##             "it_IT.utf8",
+##             "it_IT",  # Note: encoding will be 'ISO8859-1'
+##             "zh_CN.utf8",
+##             "zh_CN",  # Note: encoding will be 'gb2312'
+##         ],
+##     )
+##     def test_period_non_ascii_fmt(self, locale_str):
+##         # GH#46468 non-ascii char in input format string leads to wrong output
+    
+##         # Skip if locale cannot be set
+##         if locale_str is not None and not tm.can_set_locale(locale_str, locale.LC_ALL):
+##             pytest.skip(f"Skipping as locale '{locale_str}' cannot be set on host.")
+    
+##         # Change locale temporarily for this test.
+##         with tm.set_locale(locale_str, locale.LC_ALL) if locale_str else nullcontext():
+##             # Scalar
+##             per = pd.Period("2018-03-11 13:00", freq="h")
+## >           assert per.strftime("%y é") == "18 é"
+
+## ../pylib/pandas/tests/indexes/period/test_formats.py:308: 
+## _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+## period.pyx:2659: in pandas._libs.tslibs.period._Period.strftime
+##     ???
+## period.pyx:1250: in pandas._libs.tslibs.period.period_format
+##     ???
+## _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+## >   ???
+## E   UnicodeEncodeError: 'locale' codec can't encode character '\xe9' in position 3: encoding error
+
+## util.pxd:190: UnicodeEncodeError
+## ================================ warnings summary =================================
+## tests/groupby/test_categorical.py::test_basic
+##   /tmp/th798/8159179/pandas-mutant/115/pylib/numpy/core/fromnumeric.py:86: FutureWarning: The behavior of DataFrame.sum with axis=None is deprecated, in a future version this will reduce over both axes and return a scalar. To retain the old behavior, pass axis=0 (or do not pass axis)
+##     return reduction(axis=axis, out=out, **passkwargs)
+
+## tests/plotting/frame/test_frame.py: 11 warnings
+##   /home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/matplotlib/transforms.py:2652: RuntimeWarning: divide by zero encountered in scalar divide
+##     x_scale = 1.0 / inw
+
+## tests/plotting/frame/test_frame.py: 11 warnings
+##   /home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/matplotlib/transforms.py:2654: RuntimeWarning: invalid value encountered in scalar multiply
+##     self._mtx = np.array([[x_scale, 0.0    , (-inl*x_scale)],
+
+## -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+## -- generated xml file: /tmp/th798/8159179/pandas-mutant/115/pandas/test-data.xml --
+
+
+
+## > system("eval \"$(/projects/genomic-ml/projects/mutation-testing/mambaforge/bin/conda shell.bash hook)\" && conda activate pandas-dev && PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' /tmp/th798/8158726/pandas-mutant/5/pylib/pandas")
+## ============================== test session starts ==============================
+## platform linux -- Python 3.10.13, pytest-8.0.0, pluggy-1.4.0
+## PyQt5 5.15.9 -- Qt runtime 5.15.8 -- Qt compiled 5.15.8
+## rootdir: /tmp/th798/8158726/pandas-mutant/5/pylib/pandas
+## configfile: pyproject.toml
+## plugins: cov-4.1.0, xdist-3.5.0, anyio-4.2.0, hypothesis-6.98.2, qt-4.3.1, cython-0.2.1
+## collected 232715 items / 6933 deselected / 225782 selected                      
+## ...
+## ============================ short test summary info ============================
+## FAILED ../../../../tmp/th798/8158726/pandas-mutant/5/pylib/pandas/tests/config/test_localization.py::test_encoding_detected
+## FAILED ../../../../tmp/th798/8158726/pandas-mutant/5/pylib/pandas/tests/indexes/period/test_formats.py::TestPeriodIndexFormat::test_period_non_ascii_fmt[(None, None)]
+## FAILED ../../../../tmp/th798/8158726/pandas-mutant/5/pylib/pandas/tests/io/formats/style/test_html.py::test_html_template_extends_options
+## = 3 failed, 217344 passed, 6533 skipped, 6933 deselected, 1809 xfailed, 93 xpassed, 23 warnings in 3735.90s (1:02:15) =
+
+
+
+## (pandas-dev) th798@cn59:~$ PYTHONPATH=$PYLIB python
+## Python 3.10.13 | packaged by conda-forge | (main, Dec 23 2023, 15:36:39) [GCC 12.3.0] on linux
+## Type "help", "copyright", "credits" or "license" for more information.
+## >>> import pandas
+## >>> pandas.test()
+## running: pytest -m not slow and not network and not db /tmp/th798/8158726/pandas-mutant/5/pylib/pandas
+## ============================== test session starts ==============================
+## platform linux -- Python 3.10.13, pytest-8.0.0, pluggy-1.4.0
+## PyQt5 5.15.9 -- Qt runtime 5.15.8 -- Qt compiled 5.15.8
+## rootdir: /tmp/th798/8158726/pandas-mutant/5/pylib/pandas
+## configfile: pyproject.toml
+## plugins: cov-4.1.0, xdist-3.5.0, anyio-4.2.0, hypothesis-6.98.2, qt-4.3.1, cython-0.2.1
+## collected 232715 items / 4159 deselected / 228556 selected                      
+
+
+
+
+
+
+## FAILED 4:0 means ImportError when loading tests.
+## Successfully installed numpy-1.26.4 pandas-2.2.1+0.gbdc79c146c.dirty python-dateutil-2.9.0.post0 pytz-2024.1 six-1.16.0 tzdata-2024.1
+## ImportError while loading conftest '/tmp/th798/8159207/pandas-mutant/143/pylib/pandas/conftest.py'.
+## ../pylib/pandas/__init__.py:49: in <module>
+##     from pandas.core.api import (
+## ../pylib/pandas/core/api.py:1: in <module>
+##     from pandas._libs import (
+## ../pylib/pandas/_libs/__init__.py:16: in <module>
+##     import pandas._libs.pandas_parser  # isort: skip # type: ignore[reportUnusedImport]
+## E   ImportError: /tmp/th798/8159207/pandas-mutant/143/pylib/pandas/_libs/pandas_parser.cpython-310-x86_64-linux-gnu.so: undefined symbol: del_rd_source
+
+## FAILED 11:0 means segfault in tests, which is encouraging because tests actually run.
+## ../pylib/pandas/tests/extension/decimal/test_decimal.py ssssssssssssssssssssssssssssssssssss....................................x.................................................................................................................................................................................................................................................................................Fatal Python error: Segmentation fault
+## Current thread 0x000014b159c5f740 (most recent call first):
+##                  File "/tmp/th798/8159319/pandas-mutant/255/pylib/pandas/io/parsers/c_parser_wrapper.py", line
+## ...
+## /var/spool/slurm/slurmd/job8159319/slurm_script: line 22: 3893095 Segmentation fault      (core dumped) PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' $PYLIB/pandas
 
 fwrite(wide.dt, "data.table.jobs.csv")
 sacct.dt[State_blank=="OUT_OF_MEMORY"]
