@@ -1,13 +1,14 @@
 library(data.table)
-module.dir <- normalizePath("pandas/pandas")
-c.file.vec <- Sys.glob(file.path(module.dir,"_libs","src","parser","*.c"))
-system(paste("find",module.dir,"-name '*.c' |grep -v vendored|xargs wc -l|sort -n"))
-system(paste("find",module.dir,"-name '*.py'|xargs wc -l|grep -v '^ *0'|sort -n"))
+pandas.repo <- normalizePath("pandas")
+pandas.module <- file.path(pandas.repo, "pandas")
+c.file.vec <- Sys.glob(file.path(pandas.module,"_libs","src","parser","*.c"))
+system(paste("find",pandas.module,"-name '*.c' |grep -v vendored|xargs wc -l|sort -n"))
+system(paste("find",pandas.module,"-name '*.py'|xargs wc -l|grep -v '^ *0'|sort -n"))
 scratch.dir <- "/scratch/th798/mutation-testing"
 
 for(c.file in c.file.vec){
   print(c.file)
-  relative.c <- sub(paste0(module.dir,"/"), "", c.file)
+  relative.c <- sub(paste0(pandas.repo,"/"), "", c.file)
   out.dir <- file.path(
     scratch.dir,
     relative.c)
@@ -46,17 +47,16 @@ git clone /projects/genomic-ml/projects/mutation-testing/pandas
 eval \"$(/projects/genomic-ml/projects/mutation-testing/mambaforge/bin/conda shell.bash hook)\"
 cd pandas
 git checkout v2.2.1
-if [ -e ", mutant.c, " ]; then cp ", mutant.c, " pandas/", relative.c, "; fi
+if [ -e ", mutant.c, " ]; then cp ", mutant.c, " ", relative.c, "; fi
 conda activate pandas-dev
-##python -m pip install -ve . --no-build-isolation --config-settings editable-verbose=true
 python -m pip install -v . --no-build-isolation --target=$PYLIB --config-settings editable-verbose=true 
-PYTHONPATH=$PYLIB PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' pandas
-## https://docs.pytest.org/en/7.1.x/getting-started.html
+PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' $PYLIB/pandas
 ")
+    ## or import pandas; pandas.test()
     run_one_sh = paste0(out.dir, ".sh")
     writeLines(run_one_contents, run_one_sh)
     cat(
-      "Try a test run:\nSLURM_ARRAY_TASK_ID=1",
+      "Try a test run:\nSLURM_ARRAY_TASK_ID=", length(mutant.vec),
       " bash ", run_one_sh, "\n", sep="")
     sbatch.cmd <- paste("sbatch", run_one_sh)
     sbatch.out <- system(sbatch.cmd, intern=TRUE)
@@ -96,14 +96,15 @@ PYTHONPATH=$PYLIB PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and 
 ## <module 'pandas' from '/projects/genomic-ml/projects/mutation-testing/pandas/pandas/__init__.py'>
 ## >>> 
 
-JOBID.glob <- file.path(scratch.dir, "_libs/src/parser/*JOBID")
-JOBID.dt <- nc::capture_first_glob(
-  JOBID.glob,
-  scratch.dir,
-  "/_libs/src/parser/",
-  file=".*?",
-  ".JOBID",
-  READ=function(f)fread(f,col.names="job"))
+scratch.pandas <- file.path(scratch.dir, "pandas")
+JOBID.file.vec <- system(paste("find",scratch.pandas,"-name '*.JOBID'"), intern=TRUE)
+JOBID.dt <- nc::capture_first_vec(
+  JOBID.file.vec,
+  path=list(
+    ".*/",
+    file=".*?",
+    ".JOBID")
+)[, fread(path,col.names="job"), by=file]
 sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
 raw.dt <- slurm::sacct_lines(sacct.arg)
 sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
