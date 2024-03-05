@@ -31,27 +31,27 @@ for(c.file in c.file.vec){
     run_one_contents = paste0("#!/bin/bash
 #SBATCH --array=0-", length(mutant.vec), "
 #SBATCH --time=2:00:00
-#SBATCH --mem=2GB
+#SBATCH --mem=4GB
 #SBATCH --cpus-per-task=1
 #SBATCH --output=", log.txt, "
 #SBATCH --error=", log.txt, "
 #SBATCH --job-name=", job.name, "
 set -o errexit
-cd $TMPDIR
-mkdir -p pandas-mutant/$SLURM_ARRAY_TASK_ID
-cd pandas-mutant/$SLURM_ARRAY_TASK_ID
+TASKDIR=$TMPDIR/pandas-mutant/$SLURM_ARRAY_TASK_ID
+PYLIB=$TASKDIR/pylib
+mkdir -p $PYLIB
+cd $TASKDIR
 rm -rf pandas
 git clone /projects/genomic-ml/projects/mutation-testing/pandas
-#rm -rf mambaforge
-#cp -r /projects/genomic-ml/projects/mutation-testing/mambaforge .
-#eval \"$(mambaforge/bin/conda shell.bash hook)\"
 eval \"$(/projects/genomic-ml/projects/mutation-testing/mambaforge/bin/conda shell.bash hook)\"
 cd pandas
 git checkout v2.2.1
 if [ -e ", mutant.c, " ]; then cp ", mutant.c, " pandas/", relative.c, "; fi
 conda activate pandas-dev
-python -m pip install -ve . --no-build-isolation --config-settings editable-verbose=true
-PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' pandas
+##python -m pip install -ve . --no-build-isolation --config-settings editable-verbose=true
+python -m pip install -v . --no-build-isolation --target=$PYLIB --config-settings editable-verbose=true 
+PYTHONPATH=$PYLIB PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' pandas
+## https://docs.pytest.org/en/7.1.x/getting-started.html
 ")
     run_one_sh = paste0(out.dir, ".sh")
     writeLines(run_one_contents, run_one_sh)
@@ -68,6 +68,33 @@ PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and no
     }
   }
 }
+
+## https://pip.pypa.io/en/stable/cli/pip_install/#obtaining-information-about-what-was-installed
+## The install command has a --report option that will generate a JSON report of what pip has installed.
+## -e, --editable <path/url> Install a project in editable mode (i.e. setuptools “develop mode”) from a local project path or a VCS url. https://setuptools.pypa.io/en/latest/userguide/development_mode.html https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs
+## --no-build-isolation Disable isolation when building a modern source distribution. Build dependencies specified by PEP 518 must be already installed if this option is used.
+## -C, --config-settings <settings> Configuration settings to be passed to the PEP 517 build backend. Settings take the form KEY=VALUE. Use multiple --config-settings options to pass multiple keys to the backend.
+## https://pip.pypa.io/en/stable/cli/pip_uninstall/
+
+## Installing collected packages: pandas
+##   Attempting uninstall: pandas
+##     Found existing installation: pandas 2.2.1+0.gbdc79c146c.dirty
+##     Uninstalling pandas-2.2.1+0.gbdc79c146c.dirty:
+##       Removing file or directory /projects/genomic-ml/projects/mutation-testing/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/__pycache__/_pandas_editable_loader.cpython-310.pyc
+##       Removing file or directory /projects/genomic-ml/projects/mutation-testing/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pandas_editable_loader.py
+##       Removing file or directory /projects/genomic-ml/projects/mutation-testing/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pandas-2.2.1+0.gbdc79c146c.dirty.dist-info/
+##       Removing file or directory /projects/genomic-ml/projects/mutation-testing/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pandas-editable.pth
+##       Successfully uninstalled pandas-2.2.1+0.gbdc79c146c.dirty
+## Successfully installed pandas-2.2.1
+## (pandas-dev) th798@cn105:~/genomic-ml/projects/mutation-testing/pandas((HEAD detached at v2.2.1))$ python 
+## Python 3.10.13 | packaged by conda-forge | (main, Dec 23 2023, 15:36:39) [GCC 12.3.0] on linux
+## Type "help", "copyright", "credits" or "license" for more information.
+## >>> import pandas
+## + /home/th798/mambaforge/envs/pandas-dev/bin/ninja
+## [1/1] Generating write_version_file with a custom command
+## >>> pandas
+## <module 'pandas' from '/projects/genomic-ml/projects/mutation-testing/pandas/pandas/__init__.py'>
+## >>> 
 
 JOBID.glob <- file.path(scratch.dir, "_libs/src/parser/*JOBID")
 JOBID.dt <- nc::capture_first_glob(
