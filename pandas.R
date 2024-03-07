@@ -1,10 +1,17 @@
 library(data.table)
 pandas.repo <- normalizePath("pandas")
 pandas.module <- file.path(pandas.repo, "pandas")
-c.file.vec <- Sys.glob(file.path(pandas.module,"_libs","src","parser","*.c"))
+pandas_libs <- file.path(pandas.module,"_libs")
+pandas_include <- file.path(pandas_libs,"include")
+c.file.vec <- Sys.glob(file.path(pandas_libs,"src","parser","*.c"))
 system(paste("find",pandas.module,"-name '*.c' |grep -v vendored|xargs wc -l|sort -n"))
-system(paste("find",pandas.module,"-name '*.py'|xargs wc -l|grep -v '^ *0'|sort -n"))
+core.dir <- file.path(pandas.module,"core")
+system(paste("find",core.dir,"-name '*.py'|xargs wc -l|grep -v '^ *0'|sort -n"),intern=TRUE)
 scratch.dir <- "/scratch/th798/mutation-testing"
+gcc.flags <- paste0(
+  "-fsyntax-only -Werror",
+  " -I", pandas_include,
+  " -I/home/th798/mambaforge/envs/pandas-dev/include/python3.10")
 
 for(c.file in c.file.vec){
   print(c.file)
@@ -14,12 +21,14 @@ for(c.file in c.file.vec){
     relative.c)
   dir.JOBID <- paste0(out.dir, ".JOBID")
   if(!file.exists(dir.JOBID)){
-    system(paste(
+    mutate.out <- paste0(out.dir,".mutate.out")
+    (mutate.cmd <- paste(
       'mkdir -p',out.dir,';',
       'cd',out.dir,';',
       'eval "$(/home/th798/mambaforge/bin/conda shell.bash hook)";',
       'conda activate pandas-dev;',
-      'mutate',c.file))
+      'mutate',c.file,"--cmd 'gcc",c.file,gcc.flags,"' |tee",mutate.out))
+    system(mutate.cmd)
     mutant.vec <- Sys.glob(file.path(out.dir,"*"))
     mutant.file <- mutant.vec[1]
     logs.dir <- paste0(dirname(mutant.file),".logs")
@@ -32,7 +41,7 @@ for(c.file in c.file.vec){
     run_one_contents = paste0("#!/bin/bash
 #SBATCH --array=0-", length(mutant.vec), "
 #SBATCH --time=2:00:00
-#SBATCH --mem=4GB
+#SBATCH --mem=6GB
 #SBATCH --cpus-per-task=1
 #SBATCH --output=", log.txt, "
 #SBATCH --error=", log.txt, "
@@ -107,7 +116,14 @@ JOBID.dt <- nc::capture_first_vec(
 )[, fread(path,col.names="job"), by=file]
 sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
 raw.dt <- slurm::sacct_lines(sacct.arg)
-code.names <- c("compile|test"=1, import=4, segfault=11)
+code.names <- c(
+  "compile|test"=1,
+  pip=2,
+  import=4,
+  memory=6,
+  bus=7,
+  float=8,
+  segfault=11)
 (code.dt <- data.table(
   ExitCode_blank=paste0(code.names,":0"),
   ExitCode=names(code.names)))
@@ -124,9 +140,109 @@ sacct.join <- code.dt[
 options(width=80)
 (wide.dt <- dcast(sacct.join, job + file ~ State_blank + ExitCode, length))
 
+dcast(sacct.join, job + file + State_blank + ExitCode ~., list(min, median, max), value.var="megabytes")[order(megabytes_median)]
+sacct.join[order(-megabytes)][!is.na(megabytes)][1:100]
+
 log.glob <- "/scratch/th798/mutation-testing/pandas/_libs/src/parser/io.c.logs/*"
 system(paste("grep 'short test summary info'",log.glob),intern=TRUE)
 system(paste("grep 'failed,'",log.glob),intern=TRUE)
+
+## FAILED 6:0 is "memory problem munmap_chunk(): invalid pointer" or "double free or corruption (fasttop)"
+## ../pylib/pandas/tests/extension/decimal/test_decimal.py ssssssssssssssssssssssssssssssssssss....................................x.................................................................................................................................................................................................................................................................................double free or corruption (fasttop)
+## Fatal Python error: Aborted
+## Current thread 0x000014dd2692a740 (most recent call first):
+##   File "/tmp/th798/8165455/pandas-mutant/185/pylib/pandas/io/parsers/readers.py", line 1026 in read_csv
+##   File "/tmp/th798/8165455/pandas-mutant/185/pylib/pandas/tests/extension/base/io.py", line 35 in test_EA_types
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/python.py", line 193 in pytest_pyfunc_call
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_callers.py", line 102 in _multicall
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_manager.py", line 119 in _hookexec
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_hooks.py", line 501 in __call__
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/python.py", line 1836 in runtest
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 173 in pytest_runtest_call
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_callers.py", line 102 in _multicall
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_manager.py", line 119 in _hookexec
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_hooks.py", line 501 in __call__
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 266 in <lambda>
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 345 in from_call
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 265 in call_runtest_hook
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 226 in call_and_report
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 133 in runtestprotocol
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/runner.py", line 114 in pytest_runtest_protocol
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_callers.py", line 102 in _multicall
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_manager.py", line 119 in _hookexec
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_hooks.py", line 501 in __call__
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/main.py", line 351 in pytest_runtestloop
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_callers.py", line 102 in _multicall
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_manager.py", line 119 in _hookexec
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_hooks.py", line 501 in __call__
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/main.py", line 326 in _main
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/main.py", line 272 in wrap_session
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/main.py", line 319 in pytest_cmdline_main
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_callers.py", line 102 in _multicall
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_manager.py", line 119 in _hookexec
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pluggy/_hooks.py", line 501 in __call__
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/config/__init__.py", line 174 in main
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/_pytest/config/__init__.py", line 197 in console_main
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pytest/__main__.py", line 5 in <module>
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/runpy.py", line 86 in _run_code
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/runpy.py", line 196 in _run_module_as_main
+## Extension modules: numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, pyarrow.lib, pyarrow._hdfsio, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, numexpr.interpreter, bottleneck.move, bottleneck.nonreduce, bottleneck.nonreduce_axis, bottleneck.reduce, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, zstandard.backend_c, PyQt5.QtCore, PyQt5.QtGui, PyQt5.QtWidgets, PyQt5.QtTest, scipy._lib._ccallback_c, yaml._yaml, numba.core.typeconv._typeconv, numba._helperlib, numba._dynfunc, numba._dispatcher, numba.core.runtime._nrt_python, numba.np.ufunc._internal, numba.experimental.jitclass._box, lxml._elementpath, lxml.etree, openpyxl.utils.cell, openpyxl.worksheet._reader, openpyxl.worksheet._writer, PIL._imaging, markupsafe._speedups, matplotlib._c_internal_utils, matplotlib._path, kiwisolver._cext, matplotlib._image, tables._comp_lzo, tables._comp_bzip2, tables.utilsextension, tables.hdf5extension, tables.linkextension, tables.lrucacheextension, tables.tableextension, tables.indexesextension, pandas._libs.byteswap, pandas._libs.sas, multidict._multidict, yarl._quoting_c, _brotli, aiohttp._helpers, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket, frozenlist._frozenlist, _cffi_backend, fastparquet.cencoding, fastparquet.speedups, pyarrow._orc, pyarrow._fs, pyarrow._hdfs, pyarrow._gcsfs, pyarrow._s3fs, pyreadstat._readstat_parser, pyreadstat._readstat_writer, pyreadstat.pyreadstat, sqlalchemy.cyextension.collections, sqlalchemy.cyextension.immutabledict, sqlalchemy.cyextension.processors, sqlalchemy.cyextension.resultproxy, sqlalchemy.cyextension.util, greenlet._greenlet, psutil._psutil_linux, psutil._psutil_posix, scipy.sparse._sparsetools, _csparsetools, scipy.sparse._csparsetools, scipy.linalg._fblas, scipy.linalg._flapack, scipy.linalg.cython_lapack, scipy.linalg._cythonized_array_utils, scipy.linalg._solve_toeplitz, scipy.linalg._flinalg, scipy.linalg._decomp_lu_cython, scipy.linalg._matfuncs_sqrtm_triu, scipy.linalg.cython_blas, scipy.linalg._matfuncs_expm, scipy.linalg._decomp_update, scipy.sparse.linalg._dsolve._superlu, scipy.sparse.linalg._eigen.arpack._arpack, scipy.sparse.csgraph._tools, scipy.sparse.csgraph._shortest_path, scipy.sparse.csgraph._traversal, scipy.sparse.csgraph._min_spanning_tree, scipy.sparse.csgraph._flow, scipy.sparse.csgraph._matching, scipy.sparse.csgraph._reordering, scipy._lib._uarray._uarray, scipy.special._ufuncs_cxx, scipy.special._ufuncs, scipy.special._specfun, scipy.special._comb, scipy.special._ellip_harm_2, scipy.fftpack.convolve (total: 153)
+## /var/spool/slurm/slurmd/job8165455/slurm_script: line 22: 2527512 Aborted                 (core dumped) PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' $PYLIB/pandas
+
+
+## FAILED 2:0 is some pip error as below.
+##   [106/106] pandas/util
+##   Preparing metadata (pyproject.toml): finished with status 'done'
+## ERROR: Exception:
+## Traceback (most recent call last):
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/cli/base_command.py", line 180, in exc_logging_wrapper
+##     status = run_func(*args)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/cli/req_command.py", line 245, in wrapper
+##     return func(self, options, args)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/commands/install.py", line 377, in run
+##     requirement_set = resolver.resolve(
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/resolution/resolvelib/resolver.py", line 95, in resolve
+##     result = self._result = resolver.resolve(
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_vendor/resolvelib/resolvers.py", line 546, in resolve
+##     state = resolution.resolve(requirements, max_rounds=max_rounds)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_vendor/resolvelib/resolvers.py", line 427, in resolve
+##     failure_causes = self._attempt_to_pin_criterion(name)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_vendor/resolvelib/resolvers.py", line 239, in _attempt_to_pin_criterion
+##     criteria = self._get_updated_criteria(candidate)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_vendor/resolvelib/resolvers.py", line 230, in _get_updated_criteria
+##     self._add_to_criteria(criteria, requirement, parent=candidate)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_vendor/resolvelib/resolvers.py", line 173, in _add_to_criteria
+##     if not criterion.candidates:
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_vendor/resolvelib/structs.py", line 156, in __bool__
+##     return bool(self._sequence)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 155, in __bool__
+##     return any(self)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 143, in <genexpr>
+##     return (c for c in iterator if id(c) not in self._incompatible_ids)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/resolution/resolvelib/found_candidates.py", line 44, in _iter_built
+##     for version, func in infos:
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 297, in iter_index_candidate_infos
+##     result = self._finder.find_best_candidate(
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/index/package_finder.py", line 890, in find_best_candidate
+##     candidates = self.find_all_candidates(project_name)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/index/package_finder.py", line 831, in find_all_candidates
+##     page_candidates = list(page_candidates_it)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/index/sources.py", line 194, in page_candidates
+##     yield from self._candidates_from_page(self._link)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/index/package_finder.py", line 795, in process_project_url
+##     page_links = list(parse_links(index_response))
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/index/collector.py", line 223, in wrapper_wrapper
+##     return list(fn(page))
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/site-packages/pip/_internal/index/collector.py", line 236, in parse_links
+##     data = json.loads(page.content)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/json/__init__.py", line 346, in loads
+##     return _default_decoder.decode(s)
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/json/decoder.py", line 337, in decode
+##     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+##   File "/home/th798/mambaforge/envs/pandas-dev/lib/python3.10/json/decoder.py", line 355, in raw_decode
+##     raise JSONDecodeError("Expecting value", s, err.value) from None
+## json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
 
 ## FAILED 1:0 means compilation error or test failure as below.
 ## ============================= short test summary info =============================
@@ -146,6 +262,10 @@ system(paste("grep 'failed,'",log.glob),intern=TRUE)
 ##             == codecs.lookup(system_encoding).name
 ##         )
 ## E       LookupError: unknown encoding: C
+
+## This could be fixed by changing locale from C to utf-8 or just unset LC_ALL
+## >>> codecs.lookup("utf-8")
+## <codecs.CodecInfo object for encoding utf-8 at 0x1513a57198a0>
 
 ## ../pylib/pandas/tests/config/test_localization.py:153: LookupError
 ## __________ TestPeriodIndexFormat.test_period_non_ascii_fmt[(None, None)] __________

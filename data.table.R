@@ -1,24 +1,36 @@
 library(data.table)
 system(paste("cd",tempdir(),"&& git clone ~/R/data.table"))
+Rlib <- file.path(tempdir(), "Rlib")
 clone.dir <- file.path(tempdir(), "data.table")
 system(paste("cd",clone.dir,"&& git checkout 1.15.0"))
-c.file.vec <- Sys.glob(file.path(clone.dir,"src","*.c"))
+src.file.vec <- Sys.glob(file.path(clone.dir,"R","*.R"))
+src.file.vec <- Sys.glob(file.path(clone.dir,"src","*.c"))
 scratch.dir <- "/scratch/th798/mutation-testing"
+gcc.flags <- paste(
+  "-fsyntax-only -Werror",
+  "-I/home/th798/lib64/R/include",
+  "-I/home/th798/.conda/envs/emacs1/include",
+  "-I/home/th798/include")
 
-for(c.file in c.file.vec){
-  print(c.file)
-  relative.c <- sub(paste0(tempdir(),"/"), "", c.file)
+for(src.file in src.file.vec){
+  print(src.file)
+  relative.c <- sub(paste0(tempdir(),"/"), "", src.file)
   out.dir <- file.path(
     scratch.dir,
     relative.c)
   dir.JOBID <- paste0(out.dir, ".JOBID")
   if(!file.exists(dir.JOBID)){
-    system(paste(
+    mutate.out <- paste0(out.dir,".mutate.out")
+    (mutate.cmd <- paste(
       'mkdir -p',out.dir,';',
-      'cd',out.dir,';',
+      'cd',tempdir(),';',
       'eval "$(/home/th798/mambaforge/bin/conda shell.bash hook)";',
       'conda activate pandas-dev;',
-      'mutate',c.file))
+      'mutate',src.file,
+      "--cmd 'gcc",src.file,gcc.flags,
+      "' --mutantDir",out.dir,
+      "|tee",mutate.out))
+    system(mutate.cmd)
     mutant.vec <- Sys.glob(file.path(out.dir,"*"))
     mutant.file <- mutant.vec[1]
     logs.dir <- paste0(dirname(mutant.file),".logs")
@@ -65,6 +77,41 @@ R CMD check data.table_1.15.0.tar.gz
   }
 }
 
+out.lines <- fread("cat /scratch/th798/mutation-testing/data.table/src/*.mutate.out",sep="\n",header=FALSE)[[1]]
+write.lines <- grep("VALID [written to", out.lines, value=TRUE, fixed=TRUE)
+file.pattern <- list(
+  "[.]{3}VALID [[]written to ",
+  ".*?/src/",
+  file=".*?",
+  "/.*?",
+  task="[0-9]+", as.integer,
+  "[.]c"
+)
+write.dt <- nc::capture_first_vec(write.lines, file.pattern)
+mutant.dt <- nc::capture_all_str(
+  out.lines,
+  "\nPROCESSING MUTANT: ",
+  line="[0-9]+",
+  ": +",
+  original=".*?",
+  " +==> +",
+  mutated="(?:\n(?!PROCESSING)|.)*?",
+  file.pattern)
+stopifnot(nrow(mutant.dt)==nrow(write.dt))
+stopifnot(nrow(mutant.dt[grepl("INVALID", mutated)])==0)
+dim(mutant.dt)
+
+Status.lines <- system("grep '^Status:' /scratch/th798/mutation-testing/data.table/src/*.logs/*", intern=TRUE)
+Status.dt <- nc::capture_first_vec(
+  Status.lines,
+  ".*?/src/",
+  file=".*?",
+  "[.]logs/.*?",
+  task="[0-9]+", as.integer,
+  "[.]c:",
+  nc::field("Status", ": ", ".*"))
+  
+
 JOBID.glob <- file.path(scratch.dir, "data.table/src/*JOBID")
 JOBID.vec <- Sys.glob(JOBID.glob)
 unlink(JOBID.vec[file.size(JOBID.vec)==2])
@@ -79,9 +126,24 @@ sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
 raw.dt <- slurm::sacct_lines(sacct.arg)
 sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
 options(width=150)
-wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, length)
+(wide.dt <- dcast(sacct.dt, job + file ~ State_batch + ExitCode_batch, length))
 fwrite(wide.dt, "data.table.jobs.csv")
+sacct.dt[, .SD[which.max(task)], by=.(job,file)]#supposed to complete/succeed
+note1 <- join.dt[Status=="1 NOTE"]
+completed <- join.dt[State_blank=="COMPLETED"]
+nrow(join.dt[State_batch=="COMPLETED"])
+nrow(join.dt[State_blank=="COMPLETED"])
+nrow(join.dt[Status=="1 NOTE"])
+note1[!completed, on=.(task,file)]
+completed[!note1, on=.(task,file)]
+join.dt[Status!="1 NOTE", table(Status)]
 
+join.dt <- mutant.dt[
+  Status.dt[sacct.dt, on=.(file,task)],
+  on=.(file,task)]
+join.dt[State_blank=="COMPLETED", table(Status)]
+fwrite(join.dt, "data.table.c.mutant.results.csv")
+dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, median, value.var="megabytes")
 sacct.dt[State_blank=="OUT_OF_MEMORY"]
 sacct.dt[State_blank=="RUNNING"]
 sacct.dt[State_blank=="COMPLETED"][order(Elapsed)]
