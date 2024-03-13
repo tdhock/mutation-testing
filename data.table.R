@@ -40,15 +40,18 @@ for(src.file in src.file.vec){
       out.dir,
       sub("0.c$", "$SLURM_ARRAY_TASK_ID.c", basename(mutant.file)))
     job.name <- basename(sub(".mutant.0.c", "", mutant.file))
+    ## success runtime is less than 5 min, memory usage is less than
+    ## 1GB, so these --time and --mem limits are very generous.
     run_one_contents = paste0("#!/bin/bash
 #SBATCH --array=0-", length(mutant.vec), "
-#SBATCH --time=0:10:00
-#SBATCH --mem=2GB
+#SBATCH --time=1:00:00
+#SBATCH --mem=4GB
 #SBATCH --cpus-per-task=1
 #SBATCH --output=", log.txt, "
 #SBATCH --error=", log.txt, "
 #SBATCH --job-name=", job.name, "
 set -o errexit
+unset LC_ADDRESS LC_IDENTIFICATION LC_MEASUREMENT LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE LC_TIME
 cd $TMPDIR
 mkdir -p data.table-mutant/$SLURM_ARRAY_TASK_ID
 cd data.table-mutant/$SLURM_ARRAY_TASK_ID
@@ -101,16 +104,23 @@ stopifnot(nrow(mutant.dt)==nrow(write.dt))
 stopifnot(nrow(mutant.dt[grepl("INVALID", mutated)])==0)
 dim(mutant.dt)
 
-Status.lines <- system("grep '^Status:' /scratch/th798/mutation-testing/data.table/src/*.logs/*", intern=TRUE)
+log.dir.vec <- Sys.glob(file.path(scratch.dir, "data.table", "src", "*.logs"))
+Status.lines.list <- list()
+for(log.dir.i in seq_along(log.dir.vec)){
+  log.dir <- log.dir.vec[[log.dir.i]]
+  Status.lines.list[[log.dir.i]] <- system(paste(
+    "grep '^Status:'",
+    file.path(log.dir, "*")
+  ), intern=TRUE)
+}
 Status.dt <- nc::capture_first_vec(
-  Status.lines,
+  unlist(Status.lines.list),
   ".*?/src/",
   file=".*?",
   "[.]logs/.*?",
   task="[0-9]+", as.integer,
   "[.]c:",
   nc::field("Status", ": ", ".*"))
-  
 
 JOBID.glob <- file.path(scratch.dir, "data.table/src/*JOBID")
 JOBID.vec <- Sys.glob(JOBID.glob)
@@ -125,10 +135,11 @@ JOBID.dt <- nc::capture_first_glob(
 sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
 raw.dt <- slurm::sacct_lines(sacct.arg)
 sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
-options(width=150)
-(wide.dt <- dcast(sacct.dt, job + file ~ State_batch + ExitCode_batch, length))
-fwrite(wide.dt, "data.table.jobs.csv")
+options(width=160)
 sacct.dt[, .SD[which.max(task)], by=.(job,file)]#supposed to complete/succeed
+(wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_batch, length))
+
+fwrite(wide.dt, "data.table.jobs.csv")
 note1 <- join.dt[Status=="1 NOTE"]
 completed <- join.dt[State_blank=="COMPLETED"]
 nrow(join.dt[State_batch=="COMPLETED"])
@@ -138,10 +149,25 @@ note1[!completed, on=.(task,file)]
 completed[!note1, on=.(task,file)]
 join.dt[Status!="1 NOTE", table(Status)]
 
+## >>>>> assign.c line 43
+## /*
+## /*
+## break;
+
+## >>>>> assign.c line 43
+## /*
+## /*
+## continue;
+
 join.dt <- mutant.dt[
   Status.dt[sacct.dt, on=.(file,task)],
   on=.(file,task)]
 join.dt[State_blank=="COMPLETED", table(Status)]
+comp.dt <- join.dt[State_blank=="COMPLETED"]
+for(comp.i in 1:nrow(comp.dt)){
+  comp.row <- comp.dt[comp.i]
+  comp.row[, cat(sprintf("##### %s line %s\n%s\n%s\n\n", file, line, original, mutated))]
+}
 fwrite(join.dt, "data.table.c.mutant.results.csv")
 dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, median, value.var="megabytes")
 sacct.dt[State_blank=="OUT_OF_MEMORY"]
