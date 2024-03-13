@@ -80,6 +80,38 @@ R CMD check data.table_1.15.0.tar.gz
   }
 }
 
+JOBID.glob <- file.path(scratch.dir, "data.table/src/*JOBID")
+JOBID.vec <- Sys.glob(JOBID.glob)
+unlink(JOBID.vec[file.size(JOBID.vec)==2])
+JOBID.dt <- nc::capture_first_glob(
+  JOBID.glob,
+  scratch.dir,
+  "/data.table/src/",
+  file=".*?",
+  ".JOBID",
+  READ=function(f)fread(f,col.names="job"))
+sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
+raw.dt <- slurm::sacct_lines(sacct.arg)
+sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
+dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, median, value.var="megabytes")
+sacct.dt[State_blank=="OUT_OF_MEMORY"]
+sacct.dt[State_blank=="RUNNING"]
+sacct.dt[State_blank=="COMPLETED"][order(Elapsed)]
+options(width=160)
+sacct.dt[, .SD[which.max(task)], by=.(job,file)]#supposed to complete/succeed
+(wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_batch, length))
+fwrite(wide.dt, "data.table.jobs.csv")
+
+## >>>>> assign.c line 43
+## /*
+## /*
+## break;
+
+## >>>>> assign.c line 43
+## /*
+## /*
+## continue;
+
 out.lines <- fread("cat /scratch/th798/mutation-testing/data.table/src/*.mutate.out",sep="\n",header=FALSE)[[1]]
 write.lines <- grep("VALID [written to", out.lines, value=TRUE, fixed=TRUE)
 file.pattern <- list(
@@ -122,43 +154,6 @@ Status.dt <- nc::capture_first_vec(
   "[.]c:",
   nc::field("Status", ": ", ".*"))
 
-JOBID.glob <- file.path(scratch.dir, "data.table/src/*JOBID")
-JOBID.vec <- Sys.glob(JOBID.glob)
-unlink(JOBID.vec[file.size(JOBID.vec)==2])
-JOBID.dt <- nc::capture_first_glob(
-  JOBID.glob,
-  scratch.dir,
-  "/data.table/src/",
-  file=".*?",
-  ".JOBID",
-  READ=function(f)fread(f,col.names="job"))
-sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
-raw.dt <- slurm::sacct_lines(sacct.arg)
-sacct.dt <- slurm::sacct_tasks(raw.dt)[JOBID.dt, on="job"]
-options(width=160)
-sacct.dt[, .SD[which.max(task)], by=.(job,file)]#supposed to complete/succeed
-(wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_batch, length))
-
-fwrite(wide.dt, "data.table.jobs.csv")
-note1 <- join.dt[Status=="1 NOTE"]
-completed <- join.dt[State_blank=="COMPLETED"]
-nrow(join.dt[State_batch=="COMPLETED"])
-nrow(join.dt[State_blank=="COMPLETED"])
-nrow(join.dt[Status=="1 NOTE"])
-note1[!completed, on=.(task,file)]
-completed[!note1, on=.(task,file)]
-join.dt[Status!="1 NOTE", table(Status)]
-
-## >>>>> assign.c line 43
-## /*
-## /*
-## break;
-
-## >>>>> assign.c line 43
-## /*
-## /*
-## continue;
-
 join.dt <- mutant.dt[
   Status.dt[sacct.dt, on=.(file,task)],
   on=.(file,task)]
@@ -169,10 +164,14 @@ for(comp.i in 1:nrow(comp.dt)){
   comp.row[, cat(sprintf("##### %s line %s\n%s\n%s\n\n", file, line, original, mutated))]
 }
 fwrite(join.dt, "data.table.c.mutant.results.csv")
-dcast(sacct.dt, job + file ~ State_blank + ExitCode_blank, median, value.var="megabytes")
-sacct.dt[State_blank=="OUT_OF_MEMORY"]
-sacct.dt[State_blank=="RUNNING"]
-sacct.dt[State_blank=="COMPLETED"][order(Elapsed)]
+note1 <- join.dt[Status=="1 NOTE"]
+completed <- join.dt[State_blank=="COMPLETED"]
+nrow(join.dt[State_batch=="COMPLETED"])
+nrow(join.dt[State_blank=="COMPLETED"])
+nrow(join.dt[Status=="1 NOTE"])
+note1[!completed, on=.(task,file)]
+completed[!note1, on=.(task,file)]
+join.dt[Status!="1 NOTE", table(Status)]
 
 failed.vec <- system("grep 'package installation failed' /scratch/th798/mutation-testing/data.table/src/wrappers.c.logs/*", intern=TRUE)
 failed.dt <- nc::capture_first_vec(
