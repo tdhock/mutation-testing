@@ -3,8 +3,8 @@ system(paste("cd",tempdir(),"&& git clone ~/R/data.table"))
 Rlib <- file.path(tempdir(), "Rlib")
 clone.dir <- file.path(tempdir(), "data.table")
 system(paste("cd",clone.dir,"&& git checkout 1.15.0"))
-src.file.vec <- Sys.glob(file.path(clone.dir,"R","*.R"))
 src.file.vec <- Sys.glob(file.path(clone.dir,"src","*.c"))
+src.file.vec <- Sys.glob(file.path(clone.dir,"R","*.R"))
 scratch.dir <- "/scratch/th798/mutation-testing"
 gcc.flags <- paste(
   "-fsyntax-only -Werror",
@@ -18,6 +18,12 @@ for(src.file in src.file.vec){
   out.dir <- file.path(
     scratch.dir,
     relative.c)
+  src.is.R <- grepl("R$", src.file)
+  test.cmd <- if(src.is.R){
+    paste0("R -e 'parse(\"", src.file, "\")'")
+  }else{
+    paste("gcc",src.file,gcc.flags)
+  }
   dir.JOBID <- paste0(out.dir, ".JOBID")
   if(!file.exists(dir.JOBID)){
     mutate.out <- paste0(out.dir,".mutate.out")
@@ -27,19 +33,24 @@ for(src.file in src.file.vec){
       'eval "$(/home/th798/mambaforge/bin/conda shell.bash hook)";',
       'conda activate pandas-dev;',
       'mutate',src.file,
-      "--cmd 'gcc",src.file,gcc.flags,
-      "' --mutantDir",out.dir,
+      '--cmd', shQuote(test.cmd),
+      '--mutantDir',out.dir,
       "|tee",mutate.out))
+    cat(mutate.cmd)
     system(mutate.cmd)
     mutant.vec <- Sys.glob(file.path(out.dir,"*"))
     mutant.file <- mutant.vec[1]
     logs.dir <- paste0(dirname(mutant.file),".logs")
     dir.create(logs.dir, showWarnings = FALSE)
     log.txt <- file.path(logs.dir, sub("0.c$", "%a.c", basename(mutant.file)))
+    log.txt <- file.path(logs.dir, sub("0.R$", "%a.R", basename(mutant.file)))
     mutant.c <- file.path(
       out.dir,
       sub("0.c$", "$SLURM_ARRAY_TASK_ID.c", basename(mutant.file)))
-    job.name <- basename(sub(".mutant.0.c", "", mutant.file))
+    mutant.c <- file.path(
+      out.dir,
+      sub("0.R$", "$SLURM_ARRAY_TASK_ID.R", basename(mutant.file)))
+    job.name <- basename(sub(".mutant.0.[cR]", "", mutant.file))
     ## success runtime is less than 5 min, memory usage is less than
     ## 1GB, so these --time and --mem limits are very generous.
     run_one_contents = paste0("#!/bin/bash
@@ -51,7 +62,7 @@ for(src.file in src.file.vec){
 #SBATCH --error=", log.txt, "
 #SBATCH --job-name=", job.name, "
 set -o errexit
-unset LC_ADDRESS LC_IDENTIFICATION LC_MEASUREMENT LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE LC_TIME
+unset LC_ADDRESS LC_IDENTIFICATION LC_MEASUREMENT LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE LC_TIME LC_CTYPE LC_MESSAGES LC_ALL
 cd $TMPDIR
 mkdir -p data.table-mutant/$SLURM_ARRAY_TASK_ID
 cd data.table-mutant/$SLURM_ARRAY_TASK_ID
@@ -80,14 +91,18 @@ R CMD check data.table_1.15.0.tar.gz
   }
 }
 
-JOBID.glob <- file.path(scratch.dir, "data.table/src/*JOBID")
+JOBID.glob <- file.path(scratch.dir, "data.table/*/*JOBID")
 JOBID.vec <- Sys.glob(JOBID.glob)
 unlink(JOBID.vec[file.size(JOBID.vec)==2])
+subdir.file.pattern <- list(
+  ".*?",
+  "/",
+  file=".*?")
 JOBID.dt <- nc::capture_first_glob(
   JOBID.glob,
   scratch.dir,
-  "/data.table/src/",
-  file=".*?",
+  "/data.table/",
+  subdir.file.pattern,
   ".JOBID",
   READ=function(f)fread(f,col.names="job"))
 sacct.arg <- paste0("-j",paste(JOBID.dt$job, collapse=","))
@@ -102,25 +117,18 @@ sacct.dt[, .SD[which.max(task)], by=.(job,file)]#supposed to complete/succeed
 (wide.dt <- dcast(sacct.dt, job + file ~ State_blank + ExitCode_batch, length))
 fwrite(wide.dt, "data.table.jobs.csv")
 
-## >>>>> assign.c line 43
-## /*
-## /*
-## break;
-
-## >>>>> assign.c line 43
-## /*
-## /*
-## continue;
-
-out.lines <- fread("cat /scratch/th798/mutation-testing/data.table/src/*.mutate.out",sep="\n",header=FALSE)[[1]]
+out.lines <- fread("cat /scratch/th798/mutation-testing/data.table/*/*.mutate.out",sep="\n",header=FALSE)[[1]]
 write.lines <- grep("VALID [written to", out.lines, value=TRUE, fixed=TRUE)
+suffix.pattern <- list(
+  "[.]",
+  "[cR]")
 file.pattern <- list(
   "[.]{3}VALID [[]written to ",
-  ".*?/src/",
-  file=".*?",
+  ".*/",
+  subdir.file.pattern,
   "/.*?",
   task="[0-9]+", as.integer,
-  "[.]c"
+  suffix.pattern
 )
 write.dt <- nc::capture_first_vec(write.lines, file.pattern)
 mutant.dt <- nc::capture_all_str(
@@ -132,14 +140,16 @@ mutant.dt <- nc::capture_all_str(
   " +==> +",
   mutated="(?:\n(?!PROCESSING)|.)*?",
   file.pattern)
+mutant.dt[1]
 stopifnot(nrow(mutant.dt)==nrow(write.dt))
 stopifnot(nrow(mutant.dt[grepl("INVALID", mutated)])==0)
 dim(mutant.dt)
 
-log.dir.vec <- Sys.glob(file.path(scratch.dir, "data.table", "src", "*.logs"))
+log.dir.vec <- Sys.glob(file.path(scratch.dir, "data.table", "*", "*.logs"))
 Status.lines.list <- list()
 for(log.dir.i in seq_along(log.dir.vec)){
   log.dir <- log.dir.vec[[log.dir.i]]
+  cat(sprintf("%4d / %4d dirs %s\n", log.dir.i, length(log.dir.vec), log.dir))
   Status.lines.list[[log.dir.i]] <- system(paste(
     "grep '^Status:'",
     file.path(log.dir, "*")
@@ -147,23 +157,25 @@ for(log.dir.i in seq_along(log.dir.vec)){
 }
 Status.dt <- nc::capture_first_vec(
   unlist(Status.lines.list),
-  ".*?/src/",
-  file=".*?",
+  ".*/",
+  subdir.file.pattern,
   "[.]logs/.*?",
   task="[0-9]+", as.integer,
-  "[.]c:",
+  suffix.pattern,
+  ":",
   nc::field("Status", ": ", ".*"))
 
+on.vec <- c("file","task")
 join.dt <- mutant.dt[
-  Status.dt[sacct.dt, on=.(file,task)],
-  on=.(file,task)]
+  Status.dt[sacct.dt, on=on.vec],
+  on=on.vec]
 join.dt[State_blank=="COMPLETED", table(Status)]
 comp.dt <- join.dt[State_blank=="COMPLETED"]
 for(comp.i in 1:nrow(comp.dt)){
   comp.row <- comp.dt[comp.i]
   comp.row[, cat(sprintf("##### %s line %s\n%s\n%s\n\n", file, line, original, mutated))]
 }
-fwrite(join.dt, "data.table.c.mutant.results.csv")
+fwrite(join.dt, "data.table.mutant.results.csv")
 note1 <- join.dt[Status=="1 NOTE"]
 completed <- join.dt[State_blank=="COMPLETED"]
 nrow(join.dt[State_batch=="COMPLETED"])
