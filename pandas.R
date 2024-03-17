@@ -17,8 +17,9 @@ gcc.flags <- paste0(
   " -I", pandas_include,
   " -I/home/th798/mambaforge/envs/pandas-dev/include/python3.10")
 
-for(src.file in src.file.vec){
-  print(src.file)
+for(src.file.i in seq_along(src.file.vec)){
+  src.file <- src.file.vec[[src.file.i]]
+  cat(sprintf("%4d / %4d files %s\n", src.file.i, length(src.file.vec), src.file))
   relative.src <- sub(paste0(pandas.repo,"/"), "", src.file)
   out.dir <- file.path(
     scratch.dir,
