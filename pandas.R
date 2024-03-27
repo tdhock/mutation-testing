@@ -17,6 +17,7 @@ gcc.flags <- paste0(
   " -I", pandas_include,
   " -I/home/th798/mambaforge/envs/pandas-dev/include/python3.10")
 
+line.count.dt.list <- list()
 for(src.file.i in seq_along(src.file.vec)){
   src.file <- src.file.vec[[src.file.i]]
   cat(sprintf("%4d / %4d files %s\n", src.file.i, length(src.file.vec), src.file))
@@ -86,7 +87,12 @@ PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and no
       stop(JOBID)
     }
   }
+  line.count.dt.list[[src.file.i]] <- data.table(
+    file=sub(".*pandas/", "", src.file),
+    lines=length(readLines(src.file)))
 }
+(line.count.dt <- rbindlist(line.count.dt.list))
+fwrite(line.count.dt, "pandas.lines.csv")
 
 mutant.count.dt.list <- list()
 for(src.file.i in seq_along(src.file.vec)){

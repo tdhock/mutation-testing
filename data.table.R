@@ -12,6 +12,7 @@ gcc.flags <- paste(
   "-I/home/th798/.conda/envs/emacs1/include",
   "-I/home/th798/include")
 
+line.count.dt.list <- list()
 for(src.file in src.file.vec){
   print(src.file)
   relative.c <- sub(paste0(tempdir(),"/"), "", src.file)
@@ -89,7 +90,12 @@ R CMD check data.table_1.15.0.tar.gz
       stop(JOBID)
     }
   }
+  line.count.dt.list[[src.file]] <- data.table(
+    file=sub(".*data.table/", "", src.file),
+    lines=length(readLines(src.file)))
 }
+(line.count.dt <- rbindlist(line.count.dt.list))
+fwrite(line.count.dt, "data.table.lines.csv")
 
 JOBID.glob <- file.path(scratch.dir, "data.table/*/*JOBID")
 JOBID.vec <- Sys.glob(JOBID.glob)
