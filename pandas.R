@@ -39,8 +39,9 @@ for(src.file.i in seq_along(src.file.vec)){
       "|tee",mutate.out))
     system(mutate.cmd)
     mutant.vec <- Sys.glob(file.path(out.dir,"*"))
-    mutant.file <- mutant.vec[1]
-    logs.dir <- paste0(dirname(mutant.file),".logs")
+    no.suffix <- sub(paste0(suffix,"$"), "", basename(out.dir))
+    mutant.file <- file.path(out.dir, paste0(no.suffix, "mutant.0.py"))
+    logs.dir <- paste0(out.dir,".logs")
     dir.create(logs.dir, showWarnings = FALSE)
     FIND.TASK <- paste0("0.",suffix,"$")
     log.txt <- file.path(logs.dir, sub(FIND.TASK, paste0("%a.",suffix), basename(mutant.file)))
@@ -87,6 +88,25 @@ PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and no
   }
 }
 
+mutant.count.dt.list <- list()
+for(src.file.i in seq_along(src.file.vec)){
+  src.file <- src.file.vec[[src.file.i]]
+  cat(sprintf("%4d / %4d files %s\n", src.file.i, length(src.file.vec), src.file))
+  relative.src <- sub(paste0(pandas.repo,"/"), "", src.file)
+  out.dir <- file.path(
+    scratch.dir,
+    relative.src)
+  mutant.vec <- dir(out.dir)
+  suffix <- sub(".*[.]", "", src.file)
+  dir.JOBID <- paste0(out.dir, ".JOBID")
+  mutant.count.dt.list[[src.file.i]] <- data.table(
+    relative.src, mutants=length(mutant.vec))
+}
+(mutant.count.dt <- rbindlist(mutant.count.dt.list))
+JOBID.files <- mutant.count.dt[mutants==0, file.path(scratch.dir, paste0(relative.src, '.JOBID'))]
+file.exists(JOBID.files)
+unlink(JOBID.files)
+
 scratch.pandas <- file.path(scratch.dir, "pandas")
 JOBID.file.vec <- system(paste("find",scratch.pandas,"-name '*.JOBID'"), intern=TRUE)
 subdir.file.pattern <- list(
@@ -121,7 +141,7 @@ sacct.join <- code.dt[
 ][
   is.na(ExitCode), ExitCode := ExitCode_blank
 ][]
-sacct.join[, .SD[which.max(task)], keyby=.(job,file)]
+sacct.join[, .SD[which.max(task)], keyby=.(job,file)][State_blank != "COMPLETED"]
 options(width=80)
 (wide.dt <- dcast(sacct.join, job + file ~ State_blank + ExitCode, length))
 
@@ -157,5 +177,42 @@ mutant.dt <- nc::capture_all_str(
   file.pattern)
 mutant.dt[1]
 stopifnot(nrow(mutant.dt)==nrow(write.dt))
-stopifnot(nrow(mutant.dt[grepl("INVALID", mutated)])==0)
+(INVALID <- mutant.dt[grepl("INVALID", mutated)])
 dim(mutant.dt)
+mutant.dt[, myfile := sub("/[^/]+$", "", file)]
+
+log.dir.vec <- system(paste("find",scratch.pandas,"-name '*.logs'"), intern=TRUE)
+Status.lines.list <- list()
+for(log.dir.i in seq_along(log.dir.vec)){
+  log.dir <- log.dir.vec[[log.dir.i]]
+  cat(sprintf("%4d / %4d dirs %s\n", log.dir.i, length(log.dir.vec), log.dir))
+  Status.lines.list[[log.dir.i]] <- system(paste(
+    "tail -n 1",
+    file.path(log.dir, "*")
+  ), intern=TRUE)
+}
+Status.dt <- nc::capture_all_str(
+  unlist(Status.lines.list),
+  "==> ",
+  subdir.file.pattern,
+  "[.]logs/.*?",
+  task="[0-9]+", as.integer,
+  suffix.pattern,
+  " <==\n= ",
+  Status=".*?",
+  " =")
+
+
+nrow(mutant.dt)
+nrow(Status.dt)
+nrow(sacct.join)
+names(mutant.dt)
+names(Status.dt)
+names(sacct.join)
+on.vec <- c("file","task")
+mjoin <- mutant.dt[, .(line, original, mutated, file=myfile, task)]
+join.dt <- mjoin[
+  Status.dt[sacct.join, on=on.vec],
+  on=on.vec]
+join.dt[is.na(line)][, .(count=.N), by=.(file)][order(count)]
+#pandas/core/indexes/base.py mutant 996 worked
