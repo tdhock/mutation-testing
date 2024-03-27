@@ -171,6 +171,40 @@ Status.dt <- nc::capture_first_vec(
   ":",
   nc::field("Status", ": ", ".*"))
 
+for(Status.i in 1:nrow(Status.dt)){
+  cat(sprintf("%4d / %4d logs\n", Status.i, nrow(Status.dt)))
+  Status.row <- Status.dt[Status.i]
+  rel.path <- file.path(
+    if(grepl("R", Status.row$file))"R" else "src",
+    paste0(Status.row$file, ".logs"))
+  mutant.path <- file.path(
+    scratch.dir, "data.table", rel.path,
+    sub("([^.]*)$", paste0("mutant.", Status.row$task, ".\\1"), Status.row$file))
+  msg.dt <- nc::capture_all_str(
+    mutant.path,
+    "[*] ",
+    nc::field("checking", " ", '.*'),
+    " [.]{3}",
+    "(?:.*\n(?![*]))*",
+    " ",
+    msg="[A-Z]+",
+    "\n")
+  msg.ord <- c("ERROR","WARNING","NOTE")
+  bad.dt <- msg.dt[msg%in%msg.ord]
+  bad.counts <- bad.dt[, .(checks=.N), by=msg][msg.ord, on="msg", nomatch=0L]
+  count.vec <- bad.counts[, sprintf("%d %s%s", checks, msg, ifelse(checks!=1, "s", ""))]
+  parsed.status <- paste(count.vec, collapse=", ")
+  bad.vec <- bad.dt[, paste0(msg,":",checking)]
+  stopifnot(identical(Status.row$Status, parsed.status))
+  if(FALSE){
+    parsed.status
+    Status.row$Status
+    cat(readLines(mutant.path),sep="\n")
+  }
+  Status.dt[Status.i, ExitCode := paste(bad.vec, collapse=", ")]
+}
+
+
 on.vec <- c("file","task")
 join.dt <- mutant.dt[
   Status.dt[sacct.dt, on=on.vec],
