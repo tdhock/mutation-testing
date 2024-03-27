@@ -10,7 +10,10 @@ for(data.type in c("lines", "mutant.results")){
       paste0(software, ".", data.type, ".csv"))
     dt.list[[software]] <- data.table(software, fread(f))
   }
-  data.list[[data.type]] <- rbindlist(dt.list, use.names=TRUE)
+  save.dt <- rbindlist(dt.list, use.names=TRUE)
+  save.csv <- file.path("results-2024-03-27", paste0(data.type, ".csv"))
+  fwrite(save.dt, save.csv)
+  data.list[[data.type]] <- save.dt
 }
 with(data.list, lines[!mutant.results, on="file"])
 with(data.list, mutant.results[!lines, on="file"])
@@ -59,8 +62,8 @@ out.dt <- line.dt[, .(
   files=.N,
   lines=sum(lines),
   mutated=sum(mutated.lines),
-  "mutated%"=sprintf("%.1f", sum(mutated.lines)/sum(lines)),
-  "MPL"=sprintf("%.1f", sum(n.mutants)/sum(mutated.lines)),#mutants per line
+  "mutated%"=sprintf("%.1f", 100*sum(mutated.lines)/sum(lines)),
+  "mutants/line"=sprintf("%.1f", sum(n.mutants)/sum(mutated.lines)),#mutants per line
   ## all.pass=sum(n.all),
   ## some.pass=sum(n.some),
   ## none.pass=sum(n.none),
@@ -76,4 +79,4 @@ out.dt <- line.dt[, .(
 ][]
 library(xtable)
 xt <- xtable(out.dt)
-print(xt, type="latex", floating=FALSE)
+print(xt, type="latex", floating=FALSE, include.rownames=FALSE)
