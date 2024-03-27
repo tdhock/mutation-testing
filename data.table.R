@@ -3,8 +3,9 @@ system(paste("cd",tempdir(),"&& git clone ~/R/data.table"))
 Rlib <- file.path(tempdir(), "Rlib")
 clone.dir <- file.path(tempdir(), "data.table")
 system(paste("cd",clone.dir,"&& git checkout 1.15.0"))
-src.file.vec <- Sys.glob(file.path(clone.dir,"src","*.c"))
-src.file.vec <- Sys.glob(file.path(clone.dir,"R","*.R"))
+src.file.vec.c <- Sys.glob(file.path(clone.dir,"src","*.c"))
+src.file.vec.R <- Sys.glob(file.path(clone.dir,"R","*.R"))
+src.file.vec <- c(src.file.vec.R, src.file.vec.c)
 scratch.dir <- "/scratch/th798/mutation-testing"
 gcc.flags <- paste(
   "-fsyntax-only -Werror",
@@ -91,7 +92,7 @@ R CMD check data.table_1.15.0.tar.gz
     }
   }
   line.count.dt.list[[src.file]] <- data.table(
-    file=sub(".*data.table/", "", src.file),
+    file=sub(".*/", "", src.file),
     lines=length(readLines(src.file)))
 }
 (line.count.dt <- rbindlist(line.count.dt.list))
@@ -151,30 +152,75 @@ stopifnot(nrow(mutant.dt)==nrow(write.dt))
 stopifnot(nrow(mutant.dt[grepl("INVALID", mutated)])==0)
 dim(mutant.dt)
 
-log.dir.vec <- Sys.glob(file.path(scratch.dir, "data.table", "*", "*.logs"))
-Status.lines.list <- list()
-for(log.dir.i in seq_along(log.dir.vec)){
-  log.dir <- log.dir.vec[[log.dir.i]]
-  cat(sprintf("%4d / %4d dirs %s\n", log.dir.i, length(log.dir.vec), log.dir))
-  Status.lines.list[[log.dir.i]] <- system(paste(
-    "grep '^Status:'",
-    file.path(log.dir, "*")
-  ), intern=TRUE)
+if(file.exists("data.table.status.csv")){
+  Status.dt <- fread("data.table.status.csv")
+}else{
+  log.dir.vec <- Sys.glob(file.path(scratch.dir, "data.table", "*", "*.logs"))
+  Status.lines.list <- list()
+  for(log.dir.i in seq_along(log.dir.vec)){
+    log.dir <- log.dir.vec[[log.dir.i]]
+    cat(sprintf("%4d / %4d dirs %s\n", log.dir.i, length(log.dir.vec), log.dir))
+    Status.lines.list[[log.dir.i]] <- system(paste(
+      "grep '^Status:'",
+      file.path(log.dir, "*")
+    ), intern=TRUE)
+  }
+  Status.dt <- nc::capture_first_vec(
+    unlist(Status.lines.list),
+    ".*/",
+    subdir.file.pattern,
+    "[.]logs/.*?",
+    task="[0-9]+", as.integer,
+    suffix.pattern,
+    ":",
+    nc::field("Status", ": ", ".*"))
+  indices.todo <- Status.dt[,which(is.na(ExitCode))]
+  for(Status.i in indices.todo){
+    cat(sprintf("%4d / %4d logs\n", Status.i, nrow(Status.dt)))
+    Status.row <- Status.dt[Status.i]
+    rel.path <- file.path(
+      if(grepl("R$", Status.row$file))"R" else "src",
+      paste0(Status.row$file, ".logs"))
+    mutant.path <- file.path(
+      scratch.dir, "data.table", rel.path,
+      sub("([^.]*)$", paste0("mutant.", Status.row$task, ".\\1"), Status.row$file))
+    some.lines <- system(paste("grep -v '[0-9]*:'", mutant.path),intern=TRUE)
+    msg.dt <- nc::capture_all_str(
+      some.lines,
+      "[*] ",
+      nc::field("checking", " ", '.*'),
+      " [.]{3}",
+      "(?:.*\n(?![*]))*",
+      " ",
+      msg="[A-Z]+",
+      "\n")
+    msg.ord <- c("ERROR","WARNING","NOTE")
+    bad.dt <- msg.dt[msg%in%msg.ord]
+    bad.counts <- bad.dt[, .(checks=.N), by=msg][msg.ord, on="msg", nomatch=0L]
+    count.vec <- bad.counts[, sprintf("%d %s%s", checks, msg, ifelse(checks!=1, "s", ""))]
+    parsed.status <- paste(count.vec, collapse=", ")
+    bad.vec <- bad.dt[, paste0(msg,":",checking)]
+    stopifnot(identical(Status.row$Status, parsed.status))
+    if(FALSE){
+      parsed.status
+      Status.row$Status
+      cat(readLines(mutant.path),sep="\n")
+    }
+    Status.dt[Status.i, ExitCode := paste(bad.vec, collapse=", ")]
+  }
+  fwrite(Status.dt, "data.table.status.csv")
 }
-Status.dt <- nc::capture_first_vec(
-  unlist(Status.lines.list),
-  ".*/",
-  subdir.file.pattern,
-  "[.]logs/.*?",
-  task="[0-9]+", as.integer,
-  suffix.pattern,
-  ":",
-  nc::field("Status", ": ", ".*"))
+
+nrow(mutant.dt)
+nrow(Status.dt)
+nrow(sacct.dt)
 
 on.vec <- c("file","task")
 join.dt <- mutant.dt[
   Status.dt[sacct.dt, on=on.vec],
   on=on.vec]
+join.dt[is.na(line)]
+length(JOBID.vec)
 join.dt[State_blank=="COMPLETED", table(Status)]
 comp.dt <- join.dt[State_blank=="COMPLETED"]
 for(comp.i in 1:nrow(comp.dt)){
