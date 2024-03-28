@@ -13,6 +13,7 @@ gcc.flags <- paste(
   "-I/home/th798/.conda/envs/emacs1/include",
   "-I/home/th798/include")
 
+src.file <- "/tmp/th798/9309543/Rtmp7GmkM5/data.table/src/frank.c"
 line.count.dt.list <- list()
 for(src.file in src.file.vec){
   print(src.file)
@@ -44,14 +45,13 @@ for(src.file in src.file.vec){
     mutant.file <- mutant.vec[1]
     logs.dir <- paste0(dirname(mutant.file),".logs")
     dir.create(logs.dir, showWarnings = FALSE)
-    log.txt <- file.path(logs.dir, sub("0.c$", "%a.c", basename(mutant.file)))
-    log.txt <- file.path(logs.dir, sub("0.R$", "%a.R", basename(mutant.file)))
+    suffix <- if(src.is.R)"R" else "c"
+    s <- function(num,ext)paste0(num,".",ext)
+    s.end <- paste0(suffix,"$")
+    log.txt <- file.path(logs.dir, sub(s(0,s.end), s("%a",suffix), basename(mutant.file)))
     mutant.c <- file.path(
       out.dir,
-      sub("0.c$", "$SLURM_ARRAY_TASK_ID.c", basename(mutant.file)))
-    mutant.c <- file.path(
-      out.dir,
-      sub("0.R$", "$SLURM_ARRAY_TASK_ID.R", basename(mutant.file)))
+      sub(s("0",s.end), s("$SLURM_ARRAY_TASK_ID",suffix), basename(mutant.file)))
     job.name <- basename(sub(".mutant.0.[cR]", "", mutant.file))
     ## success runtime is less than 5 min, memory usage is less than
     ## 1GB, so these --time and --mem limits are very generous.
@@ -80,7 +80,7 @@ R CMD check data.table_1.15.0.tar.gz
     run_one_sh = paste0(out.dir, ".sh")
     writeLines(run_one_contents, run_one_sh)
     cat(
-      "Try a test run:\nSLURM_ARRAY_TASK_ID=1",
+      "Try a test run:\nSLURM_ARRAY_TASK_ID=", length(mutant.vec),
       " bash ", run_one_sh, "\n", sep="")
     sbatch.cmd <- paste("sbatch", run_one_sh)
     sbatch.out <- system(sbatch.cmd, intern=TRUE)
