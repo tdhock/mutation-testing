@@ -1,5 +1,9 @@
-if(!file.exists("results-2024-03-27")){
-  system("tar xf results-2024-03-27.tgz")
+dir.create("results-figures", showWarnings=FALSE)
+results.dir <- "results-2024-03-28"
+results.tgz <- paste0(results.dir, ".tgz")
+if(!dir.exists(results.dir)){
+  system(paste0("scp th798@monsoon.hpc.nau.edu:genomic-ml/projects/mutation-testing/", results.tgz, " ."))
+  system(paste("tar xf", results.tgz))
 }
 library(data.table)
 data.list <- list()
@@ -7,12 +11,12 @@ for(data.type in c("lines", "mutant.results")){
   dt.list <- list()
   for(software in c("pandas", "data.table")){
     f <- file.path(
-      "results-2024-03-27",
+      results.dir,
       paste0(software, ".", data.type, ".csv"))
     dt.list[[software]] <- data.table(software, fread(f))
   }
   save.dt <- rbindlist(dt.list, use.names=TRUE)
-  save.csv <- file.path("results-2024-03-27", paste0(data.type, ".csv"))
+  save.csv <- file.path(results.dir, paste0(data.type, ".csv"))
   fwrite(save.dt, save.csv)
   data.list[[data.type]] <- save.dt
 }
@@ -185,7 +189,7 @@ gg <- ggplot()+
     breaks=c(0.1, 0.2, 0.4, 1, 2, 4, 10, 20, 40, 100, 200))+
   scale_y_continuous(
     "Number of mutants")
-png("results-2024-03-27-time-hist.png", width=7, height=3, units="in", res=300)
+png("results-figures/time-hist.png", width=7, height=3, units="in", res=300)
 print(gg)
 dev.off()
 ##why is pandas bimodal?
@@ -219,24 +223,56 @@ dl.dt <- line.dt[, .(
 ), by=software][
 , label := sprintf("%s\n%d files", software, files)
 ][line.dt, on="software"]
-gg <- ggplot()+
+gg <- ggplot(mapping=aes(    n.mutants, lines))+
   geom_point(aes(
-    lines, n.mutants,
     fill=type,
     color=software),
     shape=21,
     data=line.dt)+
   directlabels::geom_dl(aes(
-    lines, n.mutants, label=label),
+    label=label),
     method=list(cex=0.7, "smart.grid"),
     data=dl.dt)+
-  scale_x_log10(
+  scale_y_log10(
     "Lines of code per file")+
+  scale_x_log10(
+    "Mutants generated per file")+
+  coord_equal()+
+  scale_color_manual(
+    values=c(data.table="white", pandas="black"))
+png("results-figures/scatter-mutants-lines.png", width=4, height=2.6, units="in", res=300)
+print(gg)
+dev.off()
+
+ggplot()+
+  geom_point(aes(
+    n.mutants-n.passing, n.mutants, 
+    fill=type,
+    color=software),
+    shape=21,
+    data=line.dt)+
+  scale_x_log10(
+    "Number of mutants OK per file")+
   scale_y_log10(
     "Mutants generated per file")+
   coord_equal()+
   scale_color_manual(
     values=c(data.table="white", pandas="black"))
-png("results-2024-03-27-scatter-mutants-lines.png", width=4, height=2.6, units="in", res=300)
+
+line.dt[, OK.percent := 100*(n.mutants-n.passing)/n.mutants]
+gg <- ggplot()+
+  geom_point(aes(
+    OK.percent, lines, 
+    fill=type,
+    color=software),
+    shape=21,
+    data=line.dt)+
+  scale_x_continuous(
+    "Percent of mutants OK per file")+
+  scale_y_log10(
+    "Lines of code per file")+
+  scale_color_manual(
+    values=c(data.table="white", pandas="black"))
+png("results-figures/scatter-OK-lines.png", width=4, height=2.6, units="in", res=300)
 print(gg)
 dev.off()

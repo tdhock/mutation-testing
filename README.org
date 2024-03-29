@@ -1,5 +1,5 @@
 [[file:results-2024-03-27.R]] makes
 
-[[file:results-2024-03-27-scatter-mutants-lines.png]]
+[[file:results-figures/scatter-mutants-lines.png]]
 
-[[file:results-2024-03-27-time-hist.png]]
+[[file:results-figures/time-hist.png]]
