@@ -1,5 +1,6 @@
-system("tar xf results-2024-03-27.tgz")
-
+if(!file.exists("results-2024-03-27")){
+  system("tar xf results-2024-03-27.tgz")
+}
 library(data.table)
 data.list <- list()
 for(data.type in c("lines", "mutant.results")){
@@ -205,3 +206,28 @@ print(
   xt,
   type="latex", floating=FALSE, include.rownames=FALSE,
   format.args = list(big.mark = ","))
+
+ggplot()+
+  geom_point(aes(
+    lines, n.mutants, color=software),
+    data=line.dt)+
+  scale_x_log10()+
+  scale_y_log10()
+
+gg <- ggplot()+
+  geom_point(aes(
+    lines, n.mutants,
+    fill=type,
+    color=software),
+    shape=21,
+    data=line.dt)+
+  scale_x_log10(
+    "Lines of code per file")+
+  scale_y_log10(
+    "Mutants generated per file")+
+  coord_equal()+
+  scale_color_manual(
+    values=c(data.table="white", pandas="black"))
+png("results-2024-03-27-scatter-mutants-lines.png", width=4, height=2.6, units="in", res=300)
+print(gg)
+dev.off()
