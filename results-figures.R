@@ -203,9 +203,9 @@ dt.failures <- some.mutants[
 ][]
 dt.failures[, table(tests.failed)]
 (msg.counts <- dt.failures[tests.failed==FALSE, .(
-  msg=unlist(strsplit(ExitCode, split=", "))
-)][, .(count=.N), by=msg][order(-count)])
-(out.counts <- msg.counts[!msg %in% passing.codes])
+  check=unlist(strsplit(ExitCode, split=", "))
+)][, .(count=.N), by=check][order(-count)])
+(out.counts <- msg.counts[!check %in% passing.codes])
 xt <- xtable(out.counts, digits=1)
 print(
   xt,
