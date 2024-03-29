@@ -86,8 +86,8 @@ get.out <- function(process){
       ## all.pass=sum(n.all),
       ## some.pass=sum(n.some),
       ## none.pass=sum(n.none),
-      LinesOK,
-      "LOK%"=100*LinesOK/Mutated,
+      ## LinesOK,
+      ## "LOK%"=100*LinesOK/Mutated,
       Mutants,
       ##total.passing=sum(n.passing),
       ##percent.passing=100*sum(n.passing)/sum(n.mutants)
@@ -108,7 +108,8 @@ xt <- xtable(out.dt, digits=1)
 print(
   xt,
   type="latex", floating=FALSE, include.rownames=FALSE,
-  format.args = list(big.mark = ","))
+  format.args = list(big.mark = ","),
+  file="results-figures/table-summary.tex")
 
 ##TODO time.
 library(ggplot2)
@@ -209,7 +210,8 @@ xt <- xtable(out.counts, digits=1)
 print(
   xt,
   type="latex", floating=FALSE, include.rownames=FALSE,
-  format.args = list(big.mark = ","))
+  format.args = list(big.mark = ","),
+  file="results-figures/table-useful-checks.tex")
 
 ggplot()+
   geom_point(aes(
