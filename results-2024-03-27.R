@@ -214,6 +214,11 @@ ggplot()+
   scale_x_log10()+
   scale_y_log10()
 
+dl.dt <- line.dt[, .(
+  files=.N
+), by=software][
+, label := sprintf("%s\n%d files", software, files)
+][line.dt, on="software"]
 gg <- ggplot()+
   geom_point(aes(
     lines, n.mutants,
@@ -221,6 +226,10 @@ gg <- ggplot()+
     color=software),
     shape=21,
     data=line.dt)+
+  directlabels::geom_dl(aes(
+    lines, n.mutants, label=label),
+    method=list(cex=0.7, "smart.grid"),
+    data=dl.dt)+
   scale_x_log10(
     "Lines of code per file")+
   scale_y_log10(
