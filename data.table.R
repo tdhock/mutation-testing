@@ -12,6 +12,26 @@ gcc.flags <- paste(
   "-I/home/th798/lib64/R/include",
   "-I/home/th798/.conda/envs/emacs1/include",
   "-I/home/th798/include")
+## https://app.codecov.io/gh/rdatatable/data.table/tree/master/src shows that coverage is computed for lots of C code files.
+## https://github.com/Rdatatable/data.table/blob/master/.github/workflows/test-coverage.yaml says covr::codecov() is used to compute and upload coverage.
+if(file.exists("data.table.1.15.0.coverage.rds")){
+  cov.res <- readRDS("data.table.1.15.0.coverage.rds")
+}else{
+  cov.res <- covr::package_coverage(clone.dir)
+  saveRDS(cov.res, "data.table.1.15.0.coverage.rds")
+}
+tally.df <- covr::tally_coverage(cov.res, "line")
+## Table with one row per line that could be covered (or not) -- these
+## are typically lines in functions. Some lines, such as 1-10 in
+## AllS4.R, are always executed, when the package is loaded, so those
+## lines do not appear as rows in this table.
+(tally.dt <- data.table(
+  tally.df
+)[
+, file := sub(".*/", "", filename)
+][])
+(tally.out <- tally.dt[, .(file, line, coverage=value)])
+covered.dt <- tally.dt[0<value]#covered lines.
 
 src.file <- "/tmp/th798/9309543/Rtmp7GmkM5/data.table/src/frank.c"
 line.count.dt.list <- list()
@@ -141,7 +161,7 @@ write.dt <- nc::capture_first_vec(write.lines, file.pattern)
 mutant.dt <- nc::capture_all_str(
   out.lines,
   "\nPROCESSING MUTANT: ",
-  line="[0-9]+",
+  line="[0-9]+", as.integer,
   ": +",
   original=".*?",
   " +==> +",
@@ -151,6 +171,13 @@ mutant.dt[1]
 stopifnot(nrow(mutant.dt)==nrow(write.dt))
 stopifnot(nrow(mutant.dt[grepl("INVALID", mutated)])==0)
 dim(mutant.dt)
+
+msg.ord <- c("ERROR","WARNING","NOTE")
+msg_count_str <- function(DT){
+  bad.counts <- DT[, .(checks=.N), by=msg][msg.ord, on="msg", nomatch=0L]
+  count.vec <- bad.counts[, sprintf("%d %s%s", checks, msg, ifelse(checks!=1, "s", ""))]
+  paste(count.vec, collapse=", ")
+}
 
 if(file.exists("data.table.status.csv")){
   Status.dt <- fread("data.table.status.csv")
@@ -174,6 +201,7 @@ if(file.exists("data.table.status.csv")){
     suffix.pattern,
     ":",
     nc::field("Status", ": ", ".*"))
+  Status.dt[, ExitCode := NA_character_]
   indices.todo <- Status.dt[,which(is.na(ExitCode))]
   for(Status.i in indices.todo){
     cat(sprintf("%4d / %4d logs\n", Status.i, nrow(Status.dt)))
@@ -194,11 +222,8 @@ if(file.exists("data.table.status.csv")){
       " ",
       msg="[A-Z]+",
       "\n")
-    msg.ord <- c("ERROR","WARNING","NOTE")
     bad.dt <- msg.dt[msg%in%msg.ord]
-    bad.counts <- bad.dt[, .(checks=.N), by=msg][msg.ord, on="msg", nomatch=0L]
-    count.vec <- bad.counts[, sprintf("%d %s%s", checks, msg, ifelse(checks!=1, "s", ""))]
-    parsed.status <- paste(count.vec, collapse=", ")
+    parsed.status <- msg_count_str(bad.dt)
     bad.vec <- bad.dt[, paste0(msg,":",checking)]
     stopifnot(identical(Status.row$Status, parsed.status))
     if(FALSE){
@@ -214,11 +239,19 @@ if(file.exists("data.table.status.csv")){
 nrow(mutant.dt)
 nrow(Status.dt)
 nrow(sacct.dt)
+nrow(tally.out)
 
 on.vec <- c("file","task")
-join.dt <- mutant.dt[
-  Status.dt[sacct.dt, on=on.vec],
-  on=on.vec]
+join.dt <- tally.out[
+  mutant.dt[
+    Status.dt[sacct.dt, on=on.vec],
+    on=on.vec],
+  on=.(file,line)]
+nrow(join.dt)
+
+## covered lines which were mutated but still passed tests.
+join.dt[ExitCode=="NOTE:installed package size" & 0<coverage & !is.na(line)]
+
 join.dt[is.na(line)]
 length(JOBID.vec)
 join.dt[State_blank=="COMPLETED", table(Status)]

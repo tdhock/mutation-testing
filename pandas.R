@@ -17,6 +17,36 @@ gcc.flags <- paste0(
   " -I", pandas_include,
   " -I/home/th798/mambaforge/envs/pandas-dev/include/python3.10")
 
+## coverage is computed here? https://github.com/pandas-dev/pandas/blob/main/ci/run_tests.sh says these args are passed to pytest:
+'COVERAGE="-s --cov=pandas --cov-report=xml --cov-append --cov-config=pyproject.toml"'
+## https://app.codecov.io/gh/pandas-dev/pandas/tree/main/pandas%2F_libs shows no _src subdir, but _libs/src/parser/io.c is one file that we mutation tested.
+cov.commands <- "set -o errexit
+TASKDIR=$TMPDIR/pandas-mutant/$SLURM_ARRAY_TASK_ID
+PYLIB=$TASKDIR/pylib
+mkdir -p $PYLIB
+cd $TASKDIR
+rm -rf pandas
+git clone /projects/genomic-ml/projects/mutation-testing/pandas
+eval \"$(/projects/genomic-ml/projects/mutation-testing/mambaforge/bin/conda shell.bash hook)\"
+cd pandas
+git checkout v2.2.1
+conda activate pandas-dev
+python -m pip install -v . --no-build-isolation --target=$PYLIB --config-settings editable-verbose=true 
+PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' $PYLIB/pandas -s --cov=pandas --cov-report=xml --cov-append --cov-config=pyproject.toml"
+system(cov.commands)
+## Below --cov-report json ?
+"PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' $PYLIB/pandas -s --cov=pandas --cov-report json:/projects/genomic-ml/projects/mutation-testing/pandas_coverage.json --cov-append --cov-config=pyproject.toml|tee /projects/genomic-ml/projects/mutation-testing/pandas_coverage.out" #->zero coverage
+cov.list <- jsonlite::fromJSON("~/genomic-ml/projects/mutation-testing/pandas_coverage.json")
+names(cov.list)
+str(cov.list)
+## below save both xml and json, --cov=$PYLIB/pandas instead of just pandas.
+"PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and not clipboard and not single_cpu' $PYLIB/pandas -s --cov=$PYLIB/pandas --cov-report json:/projects/genomic-ml/projects/mutation-testing/pandas_coverage.json --cov-report xml:/projects/genomic-ml/projects/mutation-testing/pandas_coverage.xml --cov-append --cov-config=pyproject.toml|tee /projects/genomic-ml/projects/mutation-testing/pandas_coverage.out"
+system("tail -n 1 pandas_coverage.out")
+## 220415 passed, 6469 skipped, 6933 deselected, 1809 xfailed, 93 xpassed, 23 warnings in 4715.40s (1:18:35)
+res.dt <- fread("results-2024-03-28/pandas.mutant.results.csv")
+## 217403 passed, 6477 skipped, 6933 deselected, 1809 xfailed, 93 xpassed, 23 warnings in 1042.55s (0:17:22)
+system("head pandas_coverage.xml")
+
 line.count.dt.list <- list()
 for(src.file.i in seq_along(src.file.vec)){
   src.file <- src.file.vec[[src.file.i]]
