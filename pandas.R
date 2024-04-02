@@ -294,8 +294,9 @@ mjoin <- mutant.dt[, .(line, original, mutated, file=myfile, task)]
 join.dt <- coverage.dt[
   mjoin[
     Status.dt[sacct.join, on=on.vec],
-    on=on.vec],
+    on=on.vec][,line:=as.integer(line)],
   on=.(file,line)]
 join.dt[is.na(line)][, .(count=.N), by=.(file)][order(count)]
 #pandas/core/indexes/base.py mutant 996 worked
+names(join.dt)
 fwrite(join.dt, "pandas.mutant.results.csv")
