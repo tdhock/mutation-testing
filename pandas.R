@@ -47,6 +47,47 @@ res.dt <- fread("results-2024-03-28/pandas.mutant.results.csv")
 ## 217403 passed, 6477 skipped, 6933 deselected, 1809 xfailed, 93 xpassed, 23 warnings in 1042.55s (0:17:22)
 system("head pandas_coverage.xml")
 
+## <class name="__init__.py" filename="__init__.py" complexity="0" line-rate="0.8293" branch-rate="0.5">
+## 	<methods/>
+## 	<lines>
+## 		<line number="1" hits="1"/>
+class.dt <- nc::capture_all_str(
+  "pandas_coverage.xml",
+  '<class name=".*?" ',
+  nc::field("file", 'name="', ".*?"),
+  '".*\n',
+  contents='(?:\\s+<(?!/class).*\n)*')
+int.pattern <- list("[0-9]+", as.integer)
+cov.pattern <- list(
+  nc::field("line", '.*?number="', int.pattern),
+  '" hits="',
+  coverage=int.pattern)
+coverage.dt <- class.dt[, nc::capture_all_str(
+  contents, cov.pattern
+), by=file]
+line.vec <- system("grep '<line ' pandas_coverage.xml",intern=TRUE)
+nrow(coverage.dt)
+length(line.vec)
+nc::capture_first_vec(line.vec, cov.pattern)
+
+if(FALSE){#slow
+  cov.xml <- XML::xmlParse("pandas_coverage.xml")
+  cov.list <- XML::getNodeSet(cov.xml, "//class")
+  coverage.dt.list <- list()
+  for(class.i in 1:length(cov.list)){
+    cat(sprintf("%4d / %4d\n", class.i, length(cov.list)))
+    cl <- cov.list[[class.i]]
+    line.list <- XML::getNodeSet(cl, "//line")
+    get_attr <- function(at){
+      sapply(line.list, function(l)as.integer(XML::xmlAttrs(l)[[at]]))
+    }
+    coverage.dt.list[[class.i]] <- data.table(
+      file=XML::xmlAttrs(cl)[["filename"]],
+      line=get_attr("number"),
+      coverage=get_attr("hits"))
+  }
+}
+
 line.count.dt.list <- list()
 for(src.file.i in seq_along(src.file.vec)){
   src.file <- src.file.vec[[src.file.i]]
@@ -238,17 +279,23 @@ Status.dt <- nc::capture_all_str(
   Status=".*?",
   " =")
 
-
+nrow(coverage.dt)
 nrow(mutant.dt)
 nrow(Status.dt)
 nrow(sacct.join)
+
+names(coverage.dt)
 names(mutant.dt)
 names(Status.dt)
 names(sacct.join)
+
 on.vec <- c("file","task")
 mjoin <- mutant.dt[, .(line, original, mutated, file=myfile, task)]
-join.dt <- mjoin[
-  Status.dt[sacct.join, on=on.vec],
-  on=on.vec]
+join.dt <- coverage.dt[
+  mjoin[
+    Status.dt[sacct.join, on=on.vec],
+    on=on.vec],
+  on=.(file,line)]
 join.dt[is.na(line)][, .(count=.N), by=.(file)][order(count)]
 #pandas/core/indexes/base.py mutant 996 worked
+fwrite(join.dt, "pandas.mutant.results.csv")
