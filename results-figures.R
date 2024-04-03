@@ -1,5 +1,5 @@
 dir.create("results-figures", showWarnings=FALSE)
-results.dir <- "results-2024-03-28"
+results.dir <- "results-2024-04-01"
 results.tgz <- paste0(results.dir, ".tgz")
 if(!dir.exists(results.dir)){
   system(paste0("scp th798@monsoon.hpc.nau.edu:genomic-ml/projects/mutation-testing/", results.tgz, " ."))
@@ -32,6 +32,8 @@ passing.codes <- c("NOTE:installed package size", "0:0")
 some.mutants[
 , passed := ExitCode %in% passing.codes & State_blank=="COMPLETED"
 ][]
+cov.but.mut.pass <- some.mutants[passed==TRUE & 0<coverage]
+fwrite(cov.but.mut.pass, file.path(results.dir, "cov.but.mut.pass.csv"))
 mutant.counts <- some.mutants[!is.na(line), .(
   n.mutants=.N,
   n.passing=sum(passed)
