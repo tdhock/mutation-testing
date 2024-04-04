@@ -8,9 +8,12 @@ system(paste("find",pandas.module,"-name '*.c' |grep -v vendored|xargs wc -l|sor
 core.dir <- file.path(pandas.module,"core")
 system(paste("find",core.dir,"-name '*.py'|xargs wc -l|grep -v '^ *0'|sort -n"),intern=TRUE)
 get_files <- function(where,suffix){
-  system(paste0("find ",where," -name '*.", suffix, "'"),intern=TRUE)
+  cmd <- paste0("find ",where," -name '*.", suffix, "'")
+  print(cmd)
+  system(cmd,intern=TRUE)
 }
-src.file.vec <- grep("/vendored/", c(get_files(core.dir,"py"),get_files(pandas.module,"c")), value=TRUE, invert=TRUE)
+c.and.py.vec <- c(get_files(core.dir,"py"),get_files(pandas.module,"c"))
+src.file.vec <- grep("/vendored/", c.and.py.vec, value=TRUE, invert=TRUE)
 scratch.dir <- "/scratch/th798/mutation-testing"
 gcc.flags <- paste0(
   "-fsyntax-only -Werror",
@@ -159,8 +162,16 @@ PYTHONHASHSEED=1 python -m pytest -m 'not slow and not db and not network and no
       stop(JOBID)
     }
   }
+  cloc.dt <- suppressWarnings({
+    fread(cmd=paste("cloc/cloc-2.00/cloc --csv",src.file), drop=6)
+  })
   line.count.dt.list[[src.file.i]] <- data.table(
     file=sub(".*pandas/", "", src.file),
+    cloc=if(nrow(cloc.dt)){
+      cloc.dt[language=="SUM", .(blank,comment,code)]
+    }else{
+      data.table(blank=NA_integer_,comment=NA_integer_,code=NA_integer_)
+    },
     lines=length(readLines(src.file)))
 }
 (line.count.dt <- rbindlist(line.count.dt.list))
