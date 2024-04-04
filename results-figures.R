@@ -7,7 +7,7 @@ if(!dir.exists(results.dir)){
 }
 library(data.table)
 data.list <- list()
-for(data.type in c("lines", "mutant.results")){
+for(data.type in c("lines", "mutant.results", "coverage")){
   dt.list <- list()
   for(software in c("pandas", "data.table")){
     f <- file.path(
@@ -20,6 +20,29 @@ for(data.type in c("lines", "mutant.results")){
   fwrite(save.dt, save.csv)
   data.list[[data.type]] <- save.dt
 }
+data.list$coverage[, .(lines=.N, covered=sum(coverage>0)), by=software][, percent := 100*covered/lines][]
+## compare with https://app.codecov.io/gh/pandas-dev/pandas/tree/main/pandas?search=&displayType=list
+pandas.mine <- data.list$coverage[software=="pandas", .(lines=.N, covered=sum(coverage>0)), keyby=file][, percent := 100*covered/lines][]
+int.pattern <- list("[0-9]+", as.integer)
+int_group <- function(name){
+  list(nc::group(name, "\t", int.pattern), "\n")
+}
+pandas.codecov <- nc::capture_all_str(
+  "pandas_codecov.txt",
+  "pandas/",
+  file=".*?",
+  "\n",
+  int_group("Tracked"),
+  int_group("Covered"),
+  int_group("Partial"),
+  int_group("Missed"),
+  "\t\n",
+  Percent="[0-9.]+", as.numeric)
+pandas.join <- pandas.codecov[pandas.mine, on="file"]
+pandas.join[is.na(Percent)]
+pandas.codecov[!pandas.mine, on="file"]
+pandas.join.mine <- pandas.mine[pandas.codecov, on="file", nomatch=0L]
+plot(percent ~ Percent, pandas.join.mine)
 with(data.list, lines[!mutant.results, on="file"])
 with(data.list, mutant.results[!lines, on="file"])
 data.list$mutant[, .(software, file, line)]
@@ -280,3 +303,4 @@ gg <- ggplot()+
 png("results-figures/scatter-OK-lines.png", width=4, height=2.6, units="in", res=300)
 print(gg)
 dev.off()
+
