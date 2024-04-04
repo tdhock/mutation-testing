@@ -67,6 +67,7 @@ coverage.dt <- class.dt[, nc::capture_all_str(
 ), by=file]
 line.vec <- system("grep '<line ' pandas_coverage.xml",intern=TRUE)
 nrow(coverage.dt)
+fwrite(coverage.dt, "pandas.coverage.csv")
 length(line.vec)
 nc::capture_first_vec(line.vec, cov.pattern)
 

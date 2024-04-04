@@ -31,6 +31,7 @@ tally.df <- covr::tally_coverage(cov.res, "line")
 , file := sub(".*/", "", filename)
 ][])
 (tally.out <- tally.dt[, .(file, line, coverage=value)])
+fwrite(tally.out, "data.table.coverage.csv")
 covered.dt <- tally.dt[0<value]#covered lines.
 
 src.file <- "/tmp/th798/9309543/Rtmp7GmkM5/data.table/src/frank.c"
