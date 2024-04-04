@@ -9,3 +9,7 @@
 [[file:results-figures/table-summary.tex]]
 
 [[file:results-figures/table-useful-checks.tex]]
+
+[[file:results-figures/scatter-cloc-lines.png]]
+
+[[file:results-figures/scatter-cloc-lines-mutants.png]]

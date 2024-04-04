@@ -2,7 +2,9 @@ dir.create("results-figures", showWarnings=FALSE)
 results.dir <- "results-2024-04-01"
 results.tgz <- paste0(results.dir, ".tgz")
 if(!dir.exists(results.dir)){
-  system(paste0("scp th798@monsoon.hpc.nau.edu:genomic-ml/projects/mutation-testing/", results.tgz, " ."))
+  results.url <- "https://rcdata.nau.edu/genomic-ml/mutation-testing-results/"
+  tgz.url <- paste0(results.url, results.tgz)
+  download.file(tgz.url, results.tgz)
   system(paste("tar xf", results.tgz))
 }
 library(data.table)
@@ -57,6 +59,9 @@ some.mutants[
 ][]
 cov.but.mut.pass <- some.mutants[passed==TRUE & 0<coverage]
 fwrite(cov.but.mut.pass, file.path(results.dir, "cov.but.mut.pass.csv"))
+set.seed(1)
+cov.but.mut.pass.sample <- cov.but.mut.pass[, .SD[sample(.N, 0.01*.N)], by=software]
+fwrite(cov.but.mut.pass.sample, file.path(results.dir, "cov.but.mut.pass.sample.csv"))
 mutant.counts <- some.mutants[!is.na(line), .(
   n.mutants=.N,
   n.passing=sum(passed)
@@ -97,7 +102,7 @@ line.dt <- line.counts[
 get.out <- function(process){
   process(line.dt)[, {
     Mutated <- sum(mutated.lines)
-    Lines <- sum(lines)
+    Lines <- sum(cloc.code)
     Mutants <- sum(n.mutants)
     LinesOK <- sum(n.none)
     MutantsOK <- sum(n.mutants)-sum(n.passing)
@@ -238,19 +243,43 @@ print(
   format.args = list(big.mark = ","),
   file="results-figures/table-useful-checks.tex")
 
-ggplot()+
+
+line.long <- melt(
+  line.dt,
+  measure.vars=c("lines", "cloc.code"))
+gg <- ggplot()+
+  facet_grid(. ~ variable)+
   geom_point(aes(
-    lines, n.mutants, color=software),
+    value, n.mutants, color=software),
+    shape=1,
+    data=line.long)+
+  scale_x_log10()+
+  scale_y_log10()
+png("results-figures/scatter-cloc-lines-mutants.png", width=7, height=3, units="in", res=300)
+print(gg)
+dev.off()
+
+gg <- ggplot()+
+  theme_bw()+
+  coord_equal()+
+  geom_abline(
+    slope=1,intercept=0,color="grey")+
+  geom_point(aes(
+    lines, cloc.code, color=software),
+    shape=1,
     data=line.dt)+
   scale_x_log10()+
   scale_y_log10()
+png("results-figures/scatter-cloc-lines.png", width=5, height=3.5, units="in", res=300)
+print(gg)
+dev.off()
 
 dl.dt <- line.dt[, .(
   files=.N
 ), by=software][
 , label := sprintf("%s\n%d files", software, files)
 ][line.dt, on="software"]
-gg <- ggplot(mapping=aes(    n.mutants, lines))+
+gg <- ggplot(mapping=aes(    n.mutants, cloc.code))+
   geom_point(aes(
     fill=type,
     color=software),
@@ -261,7 +290,7 @@ gg <- ggplot(mapping=aes(    n.mutants, lines))+
     method=list(cex=0.7, "smart.grid"),
     data=dl.dt)+
   scale_y_log10(
-    "Lines of code per file")+
+    "Lines of code per file (cloc)")+
   scale_x_log10(
     "Mutants generated per file")+
   coord_equal()+
@@ -289,7 +318,7 @@ ggplot()+
 line.dt[, OK.percent := 100*(n.mutants-n.passing)/n.mutants]
 gg <- ggplot()+
   geom_point(aes(
-    OK.percent, lines, 
+    OK.percent, cloc.code, 
     fill=type,
     color=software),
     shape=21,
@@ -297,7 +326,7 @@ gg <- ggplot()+
   scale_x_continuous(
     "Percent of mutants OK per file")+
   scale_y_log10(
-    "Lines of code per file")+
+    "Lines of code per file (cloc)")+
   scale_color_manual(
     values=c(data.table="white", pandas="black"))
 png("results-figures/scatter-OK-lines.png", width=4, height=2.6, units="in", res=300)
