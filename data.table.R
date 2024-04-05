@@ -112,8 +112,12 @@ R CMD check data.table_1.15.0.tar.gz
       stop(JOBID)
     }
   }
+  cloc.dt <- suppressWarnings({
+    fread(cmd=paste("cloc/cloc-2.00/cloc --csv",src.file), drop=6)
+  })
   line.count.dt.list[[src.file]] <- data.table(
     file=sub(".*/", "", src.file),
+    cloc=cloc.dt[language=="SUM", .(blank,comment,code)],
     lines=length(readLines(src.file)))
 }
 (line.count.dt <- rbindlist(line.count.dt.list))
