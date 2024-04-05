@@ -55,7 +55,10 @@ some.mutants <- data.list$mutant[!only.controls, on="file"]
 some.mutants[is.na(line), table(ExitCode)]
 passing.codes <- c("NOTE:installed package size", "0:0")
 some.mutants[
-, passed := ExitCode %in% passing.codes & State_blank=="COMPLETED"
+, passed :=
+    ifelse(software=="pandas", ExitCode=="0:0", !grepl("ERROR:tests", ExitCode))
+  ##ExitCode %in% passing.codes#to use CRAN checks.
+  & State_blank=="COMPLETED"
 ][]
 cov.but.mut.pass <- some.mutants[passed==TRUE & 0<coverage]
 fwrite(cov.but.mut.pass, file.path(results.dir, "cov.but.mut.pass.csv"))
