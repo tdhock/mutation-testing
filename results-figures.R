@@ -1,5 +1,5 @@
 dir.create("results-figures", showWarnings=FALSE)
-results.dir <- "results-2024-04-01"
+results.dir <- "results-2024-04-19"
 results.tgz <- paste0(results.dir, ".tgz")
 if(!dir.exists(results.dir)){
   results.url <- "https://rcdata.nau.edu/genomic-ml/mutation-testing-results/"
@@ -143,6 +143,20 @@ print(
   type="latex", floating=FALSE, include.rownames=FALSE,
   format.args = list(big.mark = ","),
   file="results-figures/table-summary.tex")
+options(width=150)
+out.dt
+
+##are any mutants in Rcomments?
+R.comments <- cov.but.mut.pass[grepl("#",original) & grepl("R$",file)]
+R.comments[, cat(paste(sprintf("===%d/%d===\n%s\n%s",.I,.N,original,mutated), collaspe="\n"))]
+fwrite(R.comments, "cov.but.mut.pass.R.comments.csv")
+no.comments <- R.comments[
+, lapply(.SD[,.(original,mutated)], function(x)gsub("#.*", "", x,perl=TRUE))#so . does not match \n
+]
+in.com <- no.comments[, original == mutated]
+R.comments[in.com, cat(paste(sprintf("===%d/%d===\n%s\n%s",.I,.N,original,mutated), collaspe="\n"))]
+no.comments[in.com, cat(paste(sprintf("===%d/%d===\n%s\n%s",.I,.N,original,mutated), collaspe="\n"))]
+
 
 ##TODO time.
 library(ggplot2)
